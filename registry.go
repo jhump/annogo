@@ -9,12 +9,12 @@ import (
 )
 
 var (
-	registryMu            sync.RWMutex
-	funcAnnotations       = map[uintptr]annosMap{}
-	constAnnotations      = map[reflect.Type]namedElementAnnos{}
-	varAnnotations        = map[reflect.Type]namedElementAnnos{}
-	varAnnotationsByAddr  = map[uintptr]annosMap{}
-	typeAnnotations       = map[reflect.Type]*typeAnnos{}
+	registryMu           sync.RWMutex
+	funcAnnotations      = map[uintptr]annosMap{}
+	constAnnotations     = map[reflect.Type]namedElementAnnos{}
+	varAnnotations       = map[reflect.Type]namedElementAnnos{}
+	varAnnotationsByAddr = map[uintptr]annosMap{}
+	typeAnnotations      = map[reflect.Type]*typeAnnos{}
 )
 
 // AnnotationValue describes a single annotation, its type and its value.
