@@ -130,10 +130,11 @@ const (
 	// Only the embeds of top-level, named interfaces can be annotated.
 	InterfaceEmbeds
 
-	// Functions are top-level, named functions. Methods are functions, so an
-	// annotation that allows function elements also allows method elements.
-	// However, functions is only applicable towards methods that have bodies;
-	// interface methods are not included.
+	// Functions are top-level, named functions. Methods for named types are
+	// functions, too. So an annotation that allows function elements also allows
+	// such method elements. However, this only applies to methods that have
+	// bodies: interface methods are not allowed unless InterfaceMethods is also
+	// used.
 	Functions
 
 	// Variables are top-level (e.g. package-level) variables. Variables inside
