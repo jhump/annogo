@@ -24,6 +24,10 @@ type nameNode struct {
 type LiteralNode struct {
 	Val constant.Value // nil if literal nil
 	pos scanner.Position
+
+	// If Val is an int, original literal could have been a numeric literal
+	// or a rune literal. This allows for distinguishing between the two.
+	IsRune bool
 }
 
 func (n LiteralNode) Pos() scanner.Position {

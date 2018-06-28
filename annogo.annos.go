@@ -5,7 +5,7 @@ import "reflect"
 func init() {
 	v0 := Annotation{
 		AllowedElements: []ElementType{
-			2,
+			Types,
 		},
 		RuntimeVisible: true,
 	}
@@ -14,8 +14,8 @@ func init() {
 
 	v1 := Annotation{
 		AllowedElements: []ElementType{
-			2,
-			5,
+			Types,
+			Fields,
 		},
 		RuntimeVisible: true,
 	}
@@ -24,7 +24,7 @@ func init() {
 
 	v2 := Annotation{
 		AllowedElements: []ElementType{
-			1,
+			AnnotationFields,
 		},
 		RuntimeVisible: true,
 	}
@@ -33,7 +33,7 @@ func init() {
 
 	v3 := Annotation{
 		AllowedElements: []ElementType{
-			1,
+			AnnotationFields,
 		},
 		RuntimeVisible: true,
 	}

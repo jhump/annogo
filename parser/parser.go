@@ -266,7 +266,7 @@ func (l *annoLex) Lex(lval *annotationsSymType) (t int) {
 
 		case scanner.Char:
 			v := constant.MakeFromLiteral(tok, token.CHAR, 0)
-			lval.l = LiteralNode{Val: v, pos: pos}
+			lval.l = LiteralNode{Val: v, pos: pos, IsRune: true}
 			return _RUNE_LIT
 
 		case scanner.String, scanner.RawString:

@@ -48,30 +48,30 @@ type funcConstant struct {
 	fn *types.Func
 }
 
-func (c *Context) getExpressionValue(file *ast.File, node parser.ExpressionNode, adjuster posAdjuster) (types.Type, interface{}, error) {
+func (c *Context) getExpressionValue(file *ast.File, node parser.ExpressionNode, adjuster posAdjuster) (types.Type, interface{}, *types.Const, error) {
 	switch node := node.(type) {
 	case parser.AggregateNode:
-		return nil, node.Contents, nil
+		return nil, node.Contents, nil, nil
 
 	case parser.TypedExpressionNode:
 		if agg, ok := node.Value.(parser.AggregateNode); ok {
 			t, err := c.convertType(file, node.Type, adjuster)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
-			return t, agg.Contents, nil
+			return t, agg.Contents, nil, nil
 		}
 	}
 
-	t, v, err := c.determineConstantValue(file, node, adjuster)
+	t, v, ref, err := c.determineConstantValue(file, node, adjuster)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	val := getConstantValue(t, v)
 	if isUntyped(t) {
 		t = nil
 	}
-	return t, val, nil
+	return t, val, ref, nil
 }
 
 func getConstantValue(t types.Type, v constant.Value) interface{} {
@@ -116,24 +116,27 @@ func getConstantValue(t types.Type, v constant.Value) interface{} {
 	panic(fmt.Sprintf("unrecognized type and value: %v, %v", t, v))
 }
 
-func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionNode, adjuster posAdjuster) (types.Type, constant.Value, error) {
+func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionNode, adjuster posAdjuster) (types.Type, constant.Value, *types.Const, error) {
 	switch node := node.(type) {
 	case parser.LiteralNode:
 		if node.Val == nil {
-			return typeUntypedNil, nil, nil
+			return typeUntypedNil, nil, nil, nil
 		}
 		switch node.Val.Kind() {
 		case constant.Int:
-			return typeUntypedInt, node.Val, nil
+			if node.IsRune {
+				return typeUntypedRune, node.Val, nil, nil
+			}
+			return typeUntypedInt, node.Val, nil, nil
 		case constant.Float, constant.Unknown:
 			// unknown kind == NaN
-			return typeUntypedFloat, node.Val, nil
+			return typeUntypedFloat, node.Val, nil, nil
 		case constant.Complex:
-			return typeUntypedComplex, node.Val, nil
+			return typeUntypedComplex, node.Val, nil, nil
 		case constant.String:
-			return typeUntypedString, node.Val, nil
+			return typeUntypedString, node.Val, nil, nil
 		case constant.Bool:
-			return typeUntypedBool, node.Val, nil
+			return typeUntypedBool, node.Val, nil, nil
 		default:
 			panic(fmt.Sprintf("unknown kind, %v, for constant value %v", node.Val.Kind(), node.Val))
 		}
@@ -141,48 +144,48 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 	case parser.RefNode:
 		_, obj, err := c.resolveSymbol(file, node.Ident, adjuster)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if cnst, ok := obj.(*types.Const); ok {
-			return obj.Type(), cnst.Val(), nil
+			return obj.Type(), cnst.Val(), cnst, nil
 		} else if fn, ok := obj.(*types.Func); ok {
-			return obj.Type(), funcConstant{Value: constant.MakeUnknown(), fn: fn}, nil
+			return obj.Type(), funcConstant{Value: constant.MakeUnknown(), fn: fn}, nil, nil
 		} else {
 			pos := adjuster.adjustPosition(node.Ident.Pos)
-			return nil, nil, posError(pos, fmt.Errorf("identifier must be a constant or a function"))
+			return nil, nil, nil, posError(pos, fmt.Errorf("identifier must be a constant or a function"))
 		}
 
 	case parser.AggregateNode:
 		pos := adjuster.adjustPosition(node.Pos())
-		return nil, nil, posError(pos, fmt.Errorf("aggregate cannot be used in a constant expression"))
+		return nil, nil, nil, posError(pos, fmt.Errorf("aggregate cannot be used in a constant expression"))
 
 	case parser.TypedExpressionNode:
-		vt, v, err := c.determineConstantValue(file, node.Value, adjuster)
+		vt, v, ref, err := c.determineConstantValue(file, node.Value, adjuster)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		t, err := c.convertType(file, node.Type, adjuster)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		pos := adjuster.adjustPosition(node.Pos())
 		if !types.ConvertibleTo(vt, t) {
-			return nil, nil, posError(pos, fmt.Errorf("cannot convert %v to %v", vt, t))
+			return nil, nil, nil, posError(pos, fmt.Errorf("cannot convert %v to %v", vt, t))
 		}
 		basic, ok := t.Underlying().(*types.Basic)
 		typePos := adjuster.adjustPosition(node.Type.Pos())
 		if !ok {
 			// it's a function or typed nil; no conversion to do
-			return t, v, nil
+			return t, v, nil, nil
 		}
 		if types.Identical(basic, vt.Underlying()) {
 			// no overflow checks needed
-			return t, v, nil
+			return t, v, nil, nil
 		}
 		if basic.Kind() == types.Bool {
 			// no conversions needed for bools since they are only
 			// convertible to other bool types (e.g. no-op)
-			return t, v, nil
+			return t, v, ref, nil
 		}
 
 		var fn func(constant.Value, interface{}, token.Position) (constant.Value, error)
@@ -237,22 +240,22 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 			fn = convertToString
 			target = ""
 		default:
-			return nil, nil, posError(typePos, fmt.Errorf("non-basic types cannot be used in a constant expression"))
+			return nil, nil, nil, posError(typePos, fmt.Errorf("non-basic types cannot be used in a constant expression"))
 		}
 		rv, err := fn(v, target, pos)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		return t, rv, nil
+		return t, rv, ref, nil
 
 	case parser.BinaryOperatorNode:
-		lt, lv, err := c.determineConstantValue(file, node.Left, adjuster)
+		lt, lv, _, err := c.determineConstantValue(file, node.Left, adjuster)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		rt, rv, err := c.determineConstantValue(file, node.Right, adjuster)
+		rt, rv, _, err := c.determineConstantValue(file, node.Right, adjuster)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		leftPos := adjuster.adjustPosition(node.Left.Pos())
@@ -260,52 +263,50 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		opPos := adjuster.adjustPosition(node.OperatorPos)
 
 		if isNil(lt) {
-			return nil, nil, posError(leftPos, fmt.Errorf("operator not valid for nil values"))
+			return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for nil values"))
 		} else if isNil(rt) {
-			return nil, nil, posError(rightPos, fmt.Errorf("operator not valid for nil values"))
+			return nil, nil, nil, posError(rightPos, fmt.Errorf("operator not valid for nil values"))
 		}
 		if isNaN(lv) {
-			return nil, nil, posError(leftPos, fmt.Errorf("operators not valid with NaN values"))
+			return nil, nil, nil, posError(leftPos, fmt.Errorf("operators not valid with NaN values"))
 		} else if isNaN(rv) {
-			return nil, nil, posError(rightPos, fmt.Errorf("operators not valid with NaN values"))
+			return nil, nil, nil, posError(rightPos, fmt.Errorf("operators not valid with NaN values"))
 		}
 
 		opTok := toToken(node.Operator)
 		var tt types.Type
 		if isShift(opTok) {
 			tt = lt
-		} else {
-			if constAssignableTo(lt, rt) {
-				tt = rt
-			} else if constAssignableTo(rt, lt) {
-				tt = lt
-			}
+		} else if constAssignableTo(lt, rt) {
+			tt = rt
+		} else if constAssignableTo(rt, lt) {
+			tt = lt
 		}
 		if tt == nil {
-			return nil, nil, posError(opPos, fmt.Errorf("incompatible types: %v and %v", lt, rt))
+			return nil, nil, nil, posError(opPos, fmt.Errorf("incompatible types: %v and %v", lt, rt))
 		}
 
 		if _, ok := lt.Underlying().(*types.Basic); !ok {
-			return nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values", lt))
+			return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values", lt))
 		}
 
 		var v constant.Value
 		if isShift(opTok) {
 			if !isInt(lt) {
-				return nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values (only integers)", lt))
+				return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values (only integers)", lt))
 			}
 			if !isUint(rt, rv) {
-				return nil, nil, posError(rightPos, fmt.Errorf("shift operand must be uint"))
+				return nil, nil, nil, posError(rightPos, fmt.Errorf("shift operand must be uint"))
 			}
 
 			// bitwise shift operation
 			sh64, ok := constant.Uint64Val(rv)
 			if !ok {
-				return nil, nil, posError(rightPos, fmt.Errorf("shift operand overflows uint: %v", rv))
+				return nil, nil, nil, posError(rightPos, fmt.Errorf("shift operand overflows uint: %v", rv))
 			}
 			sh := uint(sh64)
 			if uint64(sh) != sh64 {
-				return nil, nil, posError(rightPos, fmt.Errorf("shift operand overflows uint: %v", rv))
+				return nil, nil, nil, posError(rightPos, fmt.Errorf("shift operand overflows uint: %v", rv))
 			}
 
 			v = constant.Shift(lv, opTok, sh)
@@ -314,29 +315,31 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 			// comparison operation
 			tt = typeUntypedBool
 
+			if isFunc(lv) || lv == nil || isFunc(rv) || rv == nil {
+				return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values", lt))
+			}
+
 			if isOrderedComparison(opTok) {
 				if isComplex(lt) || isBool(lt) {
-					return nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values", lt))
+					return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values", lt))
 				} else if isComplex(rt) || isBool(rt) {
-					return nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values", rt))
+					return nil, nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values", rt))
 				}
-			} else if isFunc(lv) || isFunc(rv) || lv == nil || rv == nil {
-				// TODO
 			}
 
 			v = constant.MakeBool(constant.Compare(lv, opTok, rv))
 
 		} else {
 			if isFunc(lv) || lv == nil {
-				return nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values", lt))
+				return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values", lt))
 			} else if isFunc(rv) || rv == nil {
-				return nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values", rt))
+				return nil, nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values", rt))
 			}
 
 			// normal binary operation
 			if opTok == token.QUO {
 				if isZero(rv) {
-					return nil, nil, posError(rightPos, fmt.Errorf("divide by zero not allowed"))
+					return nil, nil, nil, posError(rightPos, fmt.Errorf("divide by zero not allowed"))
 				}
 				if isInt(tt) {
 					opTok = token.QUO_ASSIGN
@@ -344,36 +347,36 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 			}
 			if isIntOnlyOperation(opTok) {
 				if !isInt(lt) {
-					return nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values (only integers)", lt))
+					return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values (only integers)", lt))
 				} else if !isInt(rt) {
-					return nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values (only integers)", rt))
+					return nil, nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values (only integers)", rt))
 				}
 			}
 			if isLogicalOperation(opTok) {
 				if !isBool(lt) {
-					return nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values (only bools)", lt))
+					return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values (only bools)", lt))
 				} else if !isBool(rt) {
-					return nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values (only bools", rt))
+					return nil, nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values (only bools", rt))
 				}
 			}
 			if isString(tt) && opTok != token.ADD {
-				return nil, nil, posError(leftPos, fmt.Errorf("operator not valid for string values"))
+				return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for string values"))
 			}
 
 			v = constant.BinaryOp(lv, opTok, rv)
 
 		}
-		return tt, v, nil
+		return tt, v, nil, nil
 
 	case parser.PrefixOperatorNode:
-		t, v, err := c.determineConstantValue(file, node.Value, adjuster)
+		t, v, _, err := c.determineConstantValue(file, node.Value, adjuster)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		pos := adjuster.adjustPosition(node.Value.Pos())
 		if isNaN(v) {
-			return nil, nil, posError(pos, fmt.Errorf("operators not valid with NaN values"))
+			return nil, nil, nil, posError(pos, fmt.Errorf("operators not valid with NaN values"))
 		}
 
 		opTok := toToken(node.Operator)
@@ -382,7 +385,7 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		case token.XOR:
 			// bitwise negation
 			if !isInt(t) {
-				return nil, nil, posError(pos, fmt.Errorf("operator not valid for %v values (only integers)", t))
+				return nil, nil, nil, posError(pos, fmt.Errorf("operator not valid for %v values (only integers)", t))
 			}
 			// ^x == -(x+1) in 2's complement
 			v = constant.BinaryOp(constant.MakeInt64(1), token.ADD, v)
@@ -391,21 +394,21 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		case token.SUB:
 			// unary minus
 			if !isNumber(t) {
-				return nil, nil, posError(pos, fmt.Errorf("operator not valid for %v values (only integers)", t))
+				return nil, nil, nil, posError(pos, fmt.Errorf("operator not valid for %v values (only integers)", t))
 			}
 			res = constant.BinaryOp(constant.MakeInt64(-1), token.MUL, v)
 
 		case token.NOT:
 			// logical not
 			if !isBool(t) {
-				return nil, nil, posError(pos, fmt.Errorf("operator not valid for %v values (only bools)", t))
+				return nil, nil, nil, posError(pos, fmt.Errorf("operator not valid for %v values (only bools)", t))
 			}
 			res = constant.MakeBool(!constant.BoolVal(v))
 
 		default:
 			panic(fmt.Sprintf("unknown prefix operator %v", node.Operator))
 		}
-		return t, res, nil
+		return t, res, nil, nil
 
 	case parser.ParenthesizedExpressionNode:
 		return c.determineConstantValue(file, node.Contents, adjuster)
@@ -423,13 +426,13 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 			fn = constant.Imag
 			name = "imag"
 		}
-		t, v, err := c.determineConstantValue(file, arg, adjuster)
+		t, v, _, err := c.determineConstantValue(file, arg, adjuster)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		pos := adjuster.adjustPosition(arg.Pos())
 		if !isComplex(t) && !constAssignableTo(t, typeComplex64) && !constAssignableTo(t, typeComplex128) {
-			return nil, nil, posError(pos, fmt.Errorf("invalid argument type for %s: %v", name, t))
+			return nil, nil, nil, posError(pos, fmt.Errorf("invalid argument type for %s: %v", name, t))
 		}
 		res := fn(v)
 		switch t.Underlying().(*types.Basic).Kind() {
@@ -440,16 +443,16 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		default:
 			t = typeUntypedFloat
 		}
-		return t, res, nil
+		return t, res, nil, nil
 
 	case parser.InvokeComplexNode:
-		rt, rv, err := c.determineConstantValue(file, node.RealArg, adjuster)
+		rt, rv, _, err := c.determineConstantValue(file, node.RealArg, adjuster)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		it, iv, err := c.determineConstantValue(file, node.ImagArg, adjuster)
+		it, iv, _, err := c.determineConstantValue(file, node.ImagArg, adjuster)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		pos := adjuster.adjustPosition(node.Pos())
@@ -457,19 +460,19 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		imagPos := adjuster.adjustPosition(node.ImagArg.Pos())
 
 		if !constAssignableTo(rt, it) && !constAssignableTo(rt, it) {
-			return nil, nil, posError(pos, fmt.Errorf("incompatible types: %v and %v", rt, it))
+			return nil, nil, nil, posError(pos, fmt.Errorf("incompatible types: %v and %v", rt, it))
 		}
 		if !isFloat(rt) && !constAssignableTo(rt, typeFloat64) && !constAssignableTo(rt, typeFloat32) {
-			return nil, nil, posError(realPos, fmt.Errorf("invalid argument type for complex: %v", rt))
+			return nil, nil, nil, posError(realPos, fmt.Errorf("invalid argument type for complex: %v", rt))
 		} else if !isFloat(it) && !constAssignableTo(it, typeFloat64) && !constAssignableTo(it, typeFloat32) {
-			return nil, nil, posError(imagPos, fmt.Errorf("invalid argument type for complex: %v", it))
+			return nil, nil, nil, posError(imagPos, fmt.Errorf("invalid argument type for complex: %v", it))
 		}
 
 		if rv.Kind() == constant.Unknown {
-			return nil, nil, posError(realPos, fmt.Errorf("invalid argument NaN for complex"))
+			return nil, nil, nil, posError(realPos, fmt.Errorf("invalid argument NaN for complex"))
 		}
 		if iv.Kind() == constant.Unknown {
-			return nil, nil, posError(imagPos, fmt.Errorf("invalid argument NaN for complex"))
+			return nil, nil, nil, posError(imagPos, fmt.Errorf("invalid argument NaN for complex"))
 		}
 
 		iv = constant.MakeImag(iv)
@@ -490,7 +493,7 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 				t = typeUntypedComplex
 			}
 		}
-		return t, res, nil
+		return t, res, nil, nil
 
 	default:
 		panic(fmt.Sprintf("unexpected kind of expression node: %T", node))

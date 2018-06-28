@@ -202,6 +202,10 @@ func generateAnnotationValue(out, curr *gopoet.CodeBlock, base string, requireCo
 		return
 	}
 
+	if val.Ref != nil {
+		requireScalarName = !types.Identical(val.Ref.Type(), val.Type)
+	}
+
 	switch t := val.Type.Underlying().(type) {
 	case *types.Pointer:
 		v := val
@@ -230,35 +234,43 @@ func generateAnnotationValue(out, curr *gopoet.CodeBlock, base string, requireCo
 			canSkipName = t == val.Type &&
 				(t.Kind() == types.Bool || t.Kind() == types.String ||
 					t.Kind() == types.Int || t.Kind() == types.Float64 ||
-					t.Kind() == types.Complex128)
+					t.Kind() == types.Complex128 || t.Kind() == types.Rune)
 			if !canSkipName {
 				curr.Printf("%s(", val.Type)
 			}
 		}
-		switch val.Kind {
-		case processor.KindBool:
-			curr.Printf("%v", val.AsBool())
-		case processor.KindInt:
-			curr.Printf("%d", val.AsInt())
-		case processor.KindUint:
-			curr.Printf("%d", val.AsUint())
-		case processor.KindFloat:
-			curr.Printf("%f", val.AsFloat())
-		case processor.KindComplex:
-			c := val.AsComplex()
-			if real(c) != 0 {
-				curr.Printf("%f", real(c))
-				if imag(c) > 0 {
-					curr.Print("+")
+		if val.Ref != nil {
+			curr.Printf("%s", val.Ref)
+		} else {
+			switch val.Kind {
+			case processor.KindBool:
+				curr.Printf("%v", val.AsBool())
+			case processor.KindInt:
+				if t.Kind() == types.Rune {
+					curr.Printf("%q", val.AsInt())
+				} else {
+					curr.Printf("%d", val.AsInt())
 				}
+			case processor.KindUint:
+				curr.Printf("%d", val.AsUint())
+			case processor.KindFloat:
+				curr.Printf("%f", val.AsFloat())
+			case processor.KindComplex:
+				c := val.AsComplex()
+				if real(c) != 0 {
+					curr.Printf("%f", real(c))
+					if imag(c) > 0 {
+						curr.Print("+")
+					}
+				}
+				if imag(c) != 0 {
+					curr.Printf("%fi", imag(c))
+				}
+			case processor.KindString:
+				curr.Printf("%q", val.AsString())
+			default:
+				panic(fmt.Sprintf("unexpected kind of annotation value for basic type %s: %s", val.Type.Underlying(), val.Kind))
 			}
-			if imag(c) != 0 {
-				curr.Printf("%fi", imag(c))
-			}
-		case processor.KindString:
-			curr.Printf("%q", val.AsString())
-		default:
-			panic(fmt.Sprintf("unexpected kind of annotation value for basic type %s: %s", val.Type.Underlying(), val.Kind))
 		}
 		if requireScalarName && !canSkipName {
 			curr.Print(")")

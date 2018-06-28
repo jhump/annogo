@@ -165,17 +165,17 @@ const (
 )
 
 var kindNames = map[ValueKind]string{
-	KindInt: "int",
-	KindUint: "uint",
-	KindFloat: "float",
+	KindInt:     "int",
+	KindUint:    "uint",
+	KindFloat:   "float",
 	KindComplex: "complex",
-	KindString: "string",
-	KindBool: "bool",
-	KindNil: "nil",
-	KindFunc: "func",
-	KindSlice: "slice",
-	KindMap: "map",
-	KindStruct: "struct",
+	KindString:  "string",
+	KindBool:    "bool",
+	KindNil:     "nil",
+	KindFunc:    "func",
+	KindSlice:   "slice",
+	KindMap:     "map",
+	KindStruct:  "struct",
 }
 
 func (k ValueKind) String() string {
@@ -218,6 +218,12 @@ type AnnotationValue struct {
 	// values, it will be a []AnnotationValue, []AnnotationMapEntry, or
 	// []AnnotationStructEntry.
 	Value interface{}
+	// If the value is a reference to a constant, this is the constant that
+	// was referenced. Expressions that include references to constants do not
+	// count. E.g. the expression "someConst + 1" would result in a nil Ref, but
+	// "someConst" would result in a non-nil Ref to someConst.
+	Ref *types.Const
+
 	// The position in source where this annotation value is defined.
 	Pos token.Position
 }
@@ -1320,7 +1326,7 @@ func checkAnnotations(annos []AnnotationMirror, ets []annogo.ElementType, isConc
 func (c *Context) convertExpression(file *ast.File, exp parser.ExpressionNode, selfType, targetType types.Type, p *types.Package, adjuster posAdjuster) (av AnnotationValue, err error) {
 	var tv typeAndVal
 	tv.pos = adjuster.adjustPosition(exp.Pos())
-	tv.t, tv.v, err = c.getExpressionValue(file, exp, adjuster)
+	tv.t, tv.v, tv.ref, err = c.getExpressionValue(file, exp, adjuster)
 	if err != nil {
 		return AnnotationValue{}, err
 	}
@@ -1330,6 +1336,7 @@ func (c *Context) convertExpression(file *ast.File, exp parser.ExpressionNode, s
 type typeAndVal struct {
 	t   types.Type
 	v   interface{}
+	ref *types.Const
 	pos token.Position
 }
 
@@ -1376,6 +1383,12 @@ func (c *Context) convertValue(file *ast.File, tv typeAndVal, selfType, targetTy
 }
 
 func (c *Context) tryConvertValue(file *ast.File, tv typeAndVal, selfType, targetType types.Type, p *types.Package, adjuster posAdjuster) (av AnnotationValue, err error) {
+	defer func() {
+		if err == nil {
+			av.Ref = tv.ref
+		}
+	}()
+
 	ntyp, typ := GetUnderlyingType(targetType)
 
 	var sourceType string
@@ -2229,7 +2242,7 @@ func (c *Context) convertType(file *ast.File, t parser.Type, adjuster posAdjuste
 		return types.NewMap(k, v), nil
 
 	case t.IsArray():
-		exptyp, v, err := c.getExpressionValue(file, t.Len(), adjuster)
+		exptyp, v, _, err := c.getExpressionValue(file, t.Len(), adjuster)
 		if err != nil {
 			return nil, err
 		}
