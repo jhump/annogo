@@ -164,6 +164,27 @@ const (
 	KindStruct
 )
 
+var kindNames = map[ValueKind]string{
+	KindInt: "int",
+	KindUint: "uint",
+	KindFloat: "float",
+	KindComplex: "complex",
+	KindString: "string",
+	KindBool: "bool",
+	KindNil: "nil",
+	KindFunc: "func",
+	KindSlice: "slice",
+	KindMap: "map",
+	KindStruct: "struct",
+}
+
+func (k ValueKind) String() string {
+	if s, ok := kindNames[k]; ok {
+		return s
+	}
+	return "<invalid>"
+}
+
 // AnnotationStructEntry represents a field in an annotation value whose type
 // is a struct.
 type AnnotationStructEntry struct {
@@ -407,7 +428,10 @@ func Process(pkgPath string, includeTest bool, outputDir string, procs ...Proces
 	}
 	allContexts := map[*types.Package]*Context{}
 	for _, pkgInfo := range prg.InitialPackages() {
-		ctx := newContext(outputDir, pkgInfo, prg, allContexts, includeTest)
+		ctx := allContexts[pkgInfo.Pkg]
+		if ctx == nil {
+			ctx = newContext(outputDir, pkgInfo, prg, allContexts, includeTest)
+		}
 		if err := ctx.computeAllAnnotations(); err != nil {
 			return err
 		}
@@ -437,27 +461,28 @@ type Context struct {
 	metadata      map[*types.TypeName]*AnnotationMetadata
 	fieldMetadata map[types.Object][]AnnotationMirror
 
-	AllElements        map[types.Object]*AnnotatedElement
-	AllAnnotationTypes map[string][]string
-	byType             map[annogo.ElementType][]*AnnotatedElement
-	byAnnotation       map[annoType][]*AnnotatedElement
-	processed          map[*ast.CommentGroup]struct{}
+	allElements         []*AnnotatedElement
+	AllElementsByObject map[types.Object]*AnnotatedElement
+	AllAnnotationTypes  map[string][]string
+	byType              map[annogo.ElementType][]*AnnotatedElement
+	byAnnotation        map[annoType][]*AnnotatedElement
+	processed           map[*ast.CommentGroup]struct{}
 }
 
 func newContext(outputDir string, pkg *loader.PackageInfo, prg *loader.Program, contextPool map[*types.Package]*Context, includeTest bool) *Context {
 	ctx := &Context{
-		Package:            pkg,
-		Program:            prg,
-		includeTest:        includeTest,
-		outputDir:          outputDir,
-		AllElements:        map[types.Object]*AnnotatedElement{},
-		AllAnnotationTypes: map[string][]string{},
-		byType:             map[annogo.ElementType][]*AnnotatedElement{},
-		byAnnotation:       map[annoType][]*AnnotatedElement{},
-		allContexts:        contextPool,
-		metadata:           map[*types.TypeName]*AnnotationMetadata{},
-		fieldMetadata:      map[types.Object][]AnnotationMirror{},
-		processed:          map[*ast.CommentGroup]struct{}{},
+		Package:             pkg,
+		Program:             prg,
+		includeTest:         includeTest,
+		outputDir:           outputDir,
+		AllElementsByObject: map[types.Object]*AnnotatedElement{},
+		AllAnnotationTypes:  map[string][]string{},
+		byType:              map[annogo.ElementType][]*AnnotatedElement{},
+		byAnnotation:        map[annoType][]*AnnotatedElement{},
+		allContexts:         contextPool,
+		metadata:            map[*types.TypeName]*AnnotationMetadata{},
+		fieldMetadata:       map[types.Object][]AnnotationMirror{},
+		processed:           map[*ast.CommentGroup]struct{}{},
 	}
 	contextPool[pkg.Pkg] = ctx
 	return ctx
@@ -496,6 +521,14 @@ func (c *Context) GetMetadata(packagePath, name string) (*AnnotationMetadata, er
 func (c *Context) GetMetadataForTypeName(t *types.TypeName) (*AnnotationMetadata, error) {
 	pkg := c.Program.AllPackages[t.Pkg()]
 	return c.getMetadata(t, pkg, parser.Identifier{PackageAlias: t.Pkg().Path(), Name: t.Name()}, nil)
+}
+
+func (c *Context) NumElements() int {
+	return len(c.allElements)
+}
+
+func (c *Context) GetElement(index int) *AnnotatedElement {
+	return c.allElements[index]
 }
 
 func (c *Context) ElementsOfType(t annogo.ElementType) []*AnnotatedElement {
@@ -621,7 +654,7 @@ func (c *Context) computeAnnotationsFromFile(file *ast.File) error {
 
 func (c *Context) computeAnnotationsFromElement(file *ast.File, ets []annogo.ElementType, id *ast.Ident, doc *ast.CommentGroup, parent *AnnotatedElement) error {
 	obj := c.Package.ObjectOf(id)
-	if _, ok := c.AllElements[obj]; ok {
+	if _, ok := c.AllElementsByObject[obj]; ok {
 		// already processed this one
 		return nil
 	}
@@ -641,7 +674,7 @@ func (c *Context) computeAnnotationsFromElement(file *ast.File, ets []annogo.Ele
 func (c *Context) computeAnnotationsFromType(file *ast.File, spec *ast.TypeSpec, doc *ast.CommentGroup) error {
 	id := spec.Name
 	obj := c.Package.ObjectOf(id).(*types.TypeName)
-	if _, ok := c.AllElements[obj]; ok {
+	if _, ok := c.AllElementsByObject[obj]; ok {
 		// already processed this one
 		return nil
 	}
@@ -736,7 +769,8 @@ func (c *Context) newElement(file *ast.File, id *ast.Ident, obj types.Object, an
 		ApplicableTypes: ets,
 		Annotations:     annos,
 	}
-	c.AllElements[obj] = ae
+	c.AllElementsByObject[obj] = ae
+	c.allElements = append(c.allElements, ae)
 	for _, et := range ets {
 		c.byType[et] = append(c.byType[et], ae)
 	}
@@ -1909,7 +1943,7 @@ func (c *Context) convertStructValue(file *ast.File, v []parser.Element, pos tok
 
 		for _, fld := range fields {
 			var fieldAnnos []AnnotationMirror
-			if ae := c.AllElements[fld]; ae != nil {
+			if ae := c.AllElementsByObject[fld]; ae != nil {
 				fieldAnnos = ae.Annotations
 			} else if named, ok := nt.(*types.Named); ok {
 				// named type has either not been processed yet or is in a
