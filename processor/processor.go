@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
-	"go/constant"
 	goparser "go/parser"
 	"go/token"
 	"go/types"
+	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"text/scanner"
@@ -57,14 +60,19 @@ type ErrorWithPosition struct {
 	pos token.Position
 }
 
+// Error implements the error interface. It includes position information in the
+// returned message.
 func (e *ErrorWithPosition) Error() string {
 	return fmt.Sprintf("%s:%d:%d: %s", e.pos.Filename, e.pos.Line, e.pos.Column, e.err.Error())
 }
 
+// Underlying returns the underlying error.
 func (e *ErrorWithPosition) Underlying() error {
 	return e.err
 }
 
+// Pos returns the location in source where the underlying error was
+// encountered.
 func (e *ErrorWithPosition) Pos() token.Position {
 	return e.pos
 }
@@ -164,6 +172,27 @@ const (
 	KindStruct
 )
 
+var kindNames = map[ValueKind]string{
+	KindInt:     "int",
+	KindUint:    "uint",
+	KindFloat:   "float",
+	KindComplex: "complex",
+	KindString:  "string",
+	KindBool:    "bool",
+	KindNil:     "nil",
+	KindFunc:    "func",
+	KindSlice:   "slice",
+	KindMap:     "map",
+	KindStruct:  "struct",
+}
+
+func (k ValueKind) String() string {
+	if s, ok := kindNames[k]; ok {
+		return s
+	}
+	return "<invalid>"
+}
+
 // AnnotationStructEntry represents a field in an annotation value whose type
 // is a struct.
 type AnnotationStructEntry struct {
@@ -197,6 +226,12 @@ type AnnotationValue struct {
 	// values, it will be a []AnnotationValue, []AnnotationMapEntry, or
 	// []AnnotationStructEntry.
 	Value interface{}
+	// If the value is a reference to a constant, this is the constant that
+	// was referenced. Expressions that include references to constants do not
+	// count. E.g. the expression "someConst + 1" would result in a nil Ref, but
+	// "someConst" would result in a non-nil Ref to someConst.
+	Ref *types.Const
+
 	// The position in source where this annotation value is defined.
 	Pos token.Position
 }
@@ -384,22 +419,101 @@ func findAnnotations(annos []AnnotationMirror, packagePath, name string) []Annot
 	return matches
 }
 
+// OutputFactory is a function that creates a writer to an output for the
+// given location. Output factories typically use os.OpenFile to create files
+// but this function allows the behavior to be customized.
+type OutputFactory func(path string) (io.WriteCloser, error)
+
 // Processor is a function that acts on annotations and is invoked from the
 // annotation processor tool. Typical processor implementations generate code
 // based on the annotations present in source.
-type Processor func(ctx *Context, outputDir string) error
+type Processor func(ctx *Context, output OutputFactory) error
 
 // ProcessAll invokes all registered Processor instances to process the given
-// package.
-func ProcessAll(pkgPath string, includeTest bool, outputDir string) error {
-	return Process(pkgPath, includeTest, outputDir, AllRegisteredProcessors()...)
+// packages. If the given outputDir is blank, the output will be the GOPATH
+// directory that contains the sources for a particular package.
+func ProcessAll(pkgPaths []string, includeTest bool, outputDir string) error {
+	return Process(pkgPaths, includeTest, outputDir, AllRegisteredProcessors()...)
 }
 
-func Process(pkgPath string, includeTest bool, outputDir string, procs ...Processor) error {
+// Process invokes the given processors to process the given packages.
+func Process(pkgPaths []string, includeTest bool, outputDir string, procs ...Processor) error {
+	importPkgs := map[string]bool{}
+	for _, pkgPath := range pkgPaths {
+		importPkgs[pkgPath] = includeTest
+	}
+	cfg := Config{
+		ImportPkgs:    importPkgs,
+		Processors:    procs,
+		OutputFactory: DefaultOutputFactory(outputDir),
+	}
+	return cfg.Execute()
+}
+
+// DefaultOutputFactory returns the default OutputFactory used by Process and
+// ProcessAll. If the given rootDir is blank, a GOPATH directory will be chosen,
+// based on the location of a package's input sources. The actual full path will
+// be <rootDir>/src/<path> (note the implicit "src" path element, just like when
+// looking for sources in GOPATH).
+//
+// After computing the destination path, os.OpenFile is used to open the file
+// for writing (creating the file if necessary, truncating it if it already
+// exists).
+func DefaultOutputFactory(rootDir string) OutputFactory {
+	return func(path string) (io.WriteCloser, error) {
+		dest, err := determineOutputDir(rootDir, filepath.Dir(path))
+		if err != nil {
+			return nil, err
+		}
+		dest = filepath.Join(dest, filepath.Base(path))
+		return os.OpenFile(dest, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0666)
+	}
+}
+
+func determineOutputDir(root, pkgPath string) (string, error) {
+	if root != "" {
+		out := filepath.Join(root, "src", pkgPath)
+		if err := os.MkdirAll(out, os.ModePerm); err != nil {
+			return "", fmt.Errorf("could not create output directory %s: %s", out, err.Error())
+		}
+		return out, nil
+	}
+	gopaths := os.Getenv("GOPATH")
+	if gopaths != "" {
+		for _, gopath := range strings.Split(gopaths, string(filepath.ListSeparator)) {
+			out := filepath.Join(gopath, "src", pkgPath)
+			_, err := os.Stat(out)
+			if err == nil {
+				return out, nil
+			}
+		}
+	}
+	out := filepath.Join(runtime.GOROOT(), "src", pkgPath)
+	_, err := os.Stat(out)
+	if err == nil {
+		return "", fmt.Errorf("cannot generate output for package %q because it is in GOROOT", pkgPath)
+	}
+	return "", fmt.Errorf("could not determine output directory for package %q", pkgPath)
+}
+
+// Config represents the configuration for running one or more Processors.
+// Callers should configure all of the exported fields and then call the
+// Execute method to actually invoke the processors.
+type Config struct {
+	ImportPkgs    map[string]bool
+	CreatePkgs    []loader.PkgSpec
+	Processors    []Processor
+	OutputFactory func(path string) (io.WriteCloser, error)
+}
+
+// Execute invokes the configured processors for the configured packages,
+// writing outputs using the configured OutputFactory.
+func (cfg *Config) Execute() error {
 	conf := loader.Config{
 		ParserMode:          goparser.ParseComments,
 		TypeCheckFuncBodies: func(string) bool { return false },
-		ImportPkgs:          map[string]bool{pkgPath: includeTest},
+		ImportPkgs:          cfg.ImportPkgs,
+		CreatePkgs:          cfg.CreatePkgs,
 	}
 	prg, err := conf.Load()
 	if err != nil {
@@ -407,12 +521,15 @@ func Process(pkgPath string, includeTest bool, outputDir string, procs ...Proces
 	}
 	allContexts := map[*types.Package]*Context{}
 	for _, pkgInfo := range prg.InitialPackages() {
-		ctx := newContext(outputDir, pkgInfo, prg, allContexts, includeTest)
+		ctx := allContexts[pkgInfo.Pkg]
+		if ctx == nil {
+			ctx = newContext(pkgInfo, prg, allContexts)
+		}
 		if err := ctx.computeAllAnnotations(); err != nil {
 			return err
 		}
-		for _, proc := range procs {
-			if err := proc(ctx, outputDir); err != nil {
+		for _, proc := range cfg.Processors {
+			if err := proc(ctx, cfg.OutputFactory); err != nil {
 				return err
 			}
 		}
@@ -428,41 +545,42 @@ type annoType struct {
 // a single package (for which the processors were invoked). It provides access
 // to all annotations and annotated elements encountered in the package.
 type Context struct {
-	Package     *loader.PackageInfo
-	Program     *loader.Program
-	includeTest bool
-	outputDir   string
+	Package *loader.PackageInfo
+	Program *loader.Program
 
 	allContexts   map[*types.Package]*Context
 	metadata      map[*types.TypeName]*AnnotationMetadata
 	fieldMetadata map[types.Object][]AnnotationMirror
 
-	AllElements        map[types.Object]*AnnotatedElement
-	AllAnnotationTypes map[string][]string
-	byType             map[annogo.ElementType][]*AnnotatedElement
-	byAnnotation       map[annoType][]*AnnotatedElement
-	processed          map[*ast.CommentGroup]struct{}
+	allElements         []*AnnotatedElement
+	AllElementsByObject map[types.Object]*AnnotatedElement
+	AllAnnotationTypes  map[string][]string
+	byType              map[annogo.ElementType][]*AnnotatedElement
+	byAnnotation        map[annoType][]*AnnotatedElement
+	processed           map[*ast.CommentGroup]struct{}
 }
 
-func newContext(outputDir string, pkg *loader.PackageInfo, prg *loader.Program, contextPool map[*types.Package]*Context, includeTest bool) *Context {
+func newContext(pkg *loader.PackageInfo, prg *loader.Program, contextPool map[*types.Package]*Context) *Context {
 	ctx := &Context{
-		Package:            pkg,
-		Program:            prg,
-		includeTest:        includeTest,
-		outputDir:          outputDir,
-		AllElements:        map[types.Object]*AnnotatedElement{},
-		AllAnnotationTypes: map[string][]string{},
-		byType:             map[annogo.ElementType][]*AnnotatedElement{},
-		byAnnotation:       map[annoType][]*AnnotatedElement{},
-		allContexts:        contextPool,
-		metadata:           map[*types.TypeName]*AnnotationMetadata{},
-		fieldMetadata:      map[types.Object][]AnnotationMirror{},
-		processed:          map[*ast.CommentGroup]struct{}{},
+		Package:             pkg,
+		Program:             prg,
+		AllElementsByObject: map[types.Object]*AnnotatedElement{},
+		AllAnnotationTypes:  map[string][]string{},
+		byType:              map[annogo.ElementType][]*AnnotatedElement{},
+		byAnnotation:        map[annoType][]*AnnotatedElement{},
+		allContexts:         contextPool,
+		metadata:            map[*types.TypeName]*AnnotationMetadata{},
+		fieldMetadata:       map[types.Object][]AnnotationMirror{},
+		processed:           map[*ast.CommentGroup]struct{}{},
 	}
 	contextPool[pkg.Pkg] = ctx
 	return ctx
 }
 
+// GetMetadata returns annotation metadata for the given annotation type. If the
+// given type's package has not yet been parsed (possible if the requested
+// annotation type is not in the transitive dependencies of the context's
+// package), it is parsed and processed.
 func (c *Context) GetMetadata(packagePath, name string) (*AnnotationMetadata, error) {
 	pkgInfo := c.Program.Package(packagePath)
 	if pkgInfo == nil {
@@ -470,14 +588,14 @@ func (c *Context) GetMetadata(packagePath, name string) (*AnnotationMetadata, er
 		conf := loader.Config{
 			ParserMode:          goparser.ParseComments,
 			TypeCheckFuncBodies: func(string) bool { return false },
-			ImportPkgs:          map[string]bool{packagePath: c.includeTest},
+			ImportPkgs:          map[string]bool{packagePath: false},
 		}
 		prg, err := conf.Load()
 		if err != nil {
 			return nil, err
 		}
 		pkgInfo = prg.Package(packagePath)
-		ctx := newContext(c.outputDir, pkgInfo, prg, c.allContexts, c.includeTest)
+		ctx := newContext(pkgInfo, prg, c.allContexts)
 		// share memoized metadata and pool of all contexts
 		ctx.metadata = c.metadata
 	}
@@ -493,15 +611,54 @@ func (c *Context) GetMetadata(packagePath, name string) (*AnnotationMetadata, er
 	return c.getMetadata(obj.(*types.TypeName), pkgInfo, parser.Identifier{PackageAlias: packagePath, Name: name}, nil)
 }
 
+// GetMetadataForTypeName returns annotation metadata for the given annotation
+// type. If the given type's package has not yet been parsed (possible if the
+// requested annotation type is not in the transitive dependencies of the
+// context's package), it is parsed and processed.
 func (c *Context) GetMetadataForTypeName(t *types.TypeName) (*AnnotationMetadata, error) {
 	pkg := c.Program.AllPackages[t.Pkg()]
 	return c.getMetadata(t, pkg, parser.Identifier{PackageAlias: t.Pkg().Path(), Name: t.Name()}, nil)
 }
 
+// NumElements returns the number of annotated elements for the context's
+// package.
+//
+// Note that only packages configured to be processed will have a non-zero
+// number of elements. Other packages (such as dependencies of those being
+// processed), may actually have annotations therein, but since they will not
+// have been processed, the context will not include them.
+func (c *Context) NumElements() int {
+	return len(c.allElements)
+}
+
+// GetElement returns the annotation element at the given index. The given index
+// must be greater than or equal to zero and less than c.NumElements().
+//
+// Note that only packages configured to be processed will have a non-zero
+// number of elements. Other packages (such as dependencies of those being
+// processed), may actually have annotations therein, but since they will not
+// have been processed, the context will not include them.
+func (c *Context) GetElement(index int) *AnnotatedElement {
+	return c.allElements[index]
+}
+
+// ElementsOfType returns a slice of annotated elements of the given type.
+//
+// Note that only packages configured to be processed will have a non-zero
+// number of elements. Other packages (such as dependencies of those being
+// processed), may actually have annotations therein, but since they will not
+// have been processed, the context will not include them.
 func (c *Context) ElementsOfType(t annogo.ElementType) []*AnnotatedElement {
 	return c.byType[t]
 }
 
+// ElementsAnnotatedWith returns a slice of elements that have been annotated
+// with the given annotation type.
+//
+// Note that only packages configured to be processed will have a non-zero
+// number of elements. Other packages (such as dependencies of those being
+// processed), may actually have annotations therein, but since they will not
+// have been processed, the context will not include them.
 func (c *Context) ElementsAnnotatedWith(packagePath, typeName string) []*AnnotatedElement {
 	return c.byAnnotation[annoType{packagePath: packagePath, name: typeName}]
 }
@@ -610,7 +767,6 @@ func (c *Context) computeAnnotationsFromFile(file *ast.File) error {
 		}
 		if pos, found := hasAnnotations(doc); found {
 			p := c.Program.Fset.Position(pos)
-			p.String()
 			err = fmt.Errorf("%v: annotations are only allowed on top-level types, functions, variables, and constants or fields and methods of top-level types", p)
 			return false
 		}
@@ -621,7 +777,7 @@ func (c *Context) computeAnnotationsFromFile(file *ast.File) error {
 
 func (c *Context) computeAnnotationsFromElement(file *ast.File, ets []annogo.ElementType, id *ast.Ident, doc *ast.CommentGroup, parent *AnnotatedElement) error {
 	obj := c.Package.ObjectOf(id)
-	if _, ok := c.AllElements[obj]; ok {
+	if _, ok := c.AllElementsByObject[obj]; ok {
 		// already processed this one
 		return nil
 	}
@@ -641,7 +797,7 @@ func (c *Context) computeAnnotationsFromElement(file *ast.File, ets []annogo.Ele
 func (c *Context) computeAnnotationsFromType(file *ast.File, spec *ast.TypeSpec, doc *ast.CommentGroup) error {
 	id := spec.Name
 	obj := c.Package.ObjectOf(id).(*types.TypeName)
-	if _, ok := c.AllElements[obj]; ok {
+	if _, ok := c.AllElementsByObject[obj]; ok {
 		// already processed this one
 		return nil
 	}
@@ -687,7 +843,7 @@ func (c *Context) computeAnnotationsFromType(file *ast.File, spec *ast.TypeSpec,
 					names = []*ast.Ident{method.Type.(*ast.Ident)}
 					elType = annogo.InterfaceEmbeds
 				}
-				for _, n := range method.Names {
+				for _, n := range names {
 					if err := c.computeAnnotationsFromElement(file, []annogo.ElementType{elType}, n, method.Doc, ae); err != nil {
 						return err
 					}
@@ -736,7 +892,8 @@ func (c *Context) newElement(file *ast.File, id *ast.Ident, obj types.Object, an
 		ApplicableTypes: ets,
 		Annotations:     annos,
 	}
-	c.AllElements[obj] = ae
+	c.AllElementsByObject[obj] = ae
+	c.allElements = append(c.allElements, ae)
 	for _, et := range ets {
 		c.byType[et] = append(c.byType[et], ae)
 	}
@@ -771,8 +928,9 @@ func (c *Context) parseAnnotations(file *ast.File, selfType types.Type, doc *ast
 
 	var annos []parser.Annotation
 	if a, err := parser.ParseAnnotations("", buf); err != nil {
-		pos := adjuster.adjustPosition(err.Pos())
-		return nil, posError(pos, err.Underlying())
+		perr := err.(*parser.ParseError)
+		pos := adjuster.adjustPosition(perr.Pos())
+		return nil, posError(pos, perr.Underlying())
 	} else {
 		annos = a
 	}
@@ -866,7 +1024,7 @@ func (c *Context) convertAnnotation(file *ast.File, selfType types.Type, a parse
 	} else {
 		var tv typeAndVal
 		tv.pos = adjuster.adjustPosition(a.Type.Pos)
-		_, u := GetUnderlyingType(meta.Representation)
+		_, u := getUnderlyingType(meta.Representation)
 		switch u.(type) {
 		case *types.Basic:
 			tv.v = true
@@ -991,7 +1149,7 @@ func (c *Context) getMetadata(anno *types.TypeName, annoPkg *loader.PackageInfo,
 	if annoPkg != c.Package {
 		ctx := c.allContexts[annoPkg.Pkg]
 		if ctx == nil {
-			ctx = newContext(c.outputDir, annoPkg, c.Program, c.allContexts, c.includeTest)
+			ctx = newContext(annoPkg, c.Program, c.allContexts)
 			// share memoized metadata and pool of all contexts
 			ctx.metadata = c.metadata
 			ctx.fieldMetadata = c.fieldMetadata
@@ -1130,7 +1288,7 @@ func (c *Context) getFieldMetadata(strct *types.Named, field *types.Var) (meta [
 	if fieldPkg != c.Package {
 		ctx := c.allContexts[fieldPkg.Pkg]
 		if ctx == nil {
-			ctx = newContext(c.outputDir, fieldPkg, c.Program, c.allContexts, c.includeTest)
+			ctx = newContext(fieldPkg, c.Program, c.allContexts)
 			// share memoized metadata and pool of all contexts
 			ctx.metadata = c.metadata
 			ctx.fieldMetadata = c.fieldMetadata
@@ -1286,7 +1444,7 @@ func checkAnnotations(annos []AnnotationMirror, ets []annogo.ElementType, isConc
 func (c *Context) convertExpression(file *ast.File, exp parser.ExpressionNode, selfType, targetType types.Type, p *types.Package, adjuster posAdjuster) (av AnnotationValue, err error) {
 	var tv typeAndVal
 	tv.pos = adjuster.adjustPosition(exp.Pos())
-	tv.t, tv.v, err = c.getExpressionValue(file, exp, adjuster)
+	tv.t, tv.v, tv.ref, err = c.getExpressionValue(file, exp, adjuster)
 	if err != nil {
 		return AnnotationValue{}, err
 	}
@@ -1296,13 +1454,14 @@ func (c *Context) convertExpression(file *ast.File, exp parser.ExpressionNode, s
 type typeAndVal struct {
 	t   types.Type
 	v   interface{}
+	ref *types.Const
 	pos token.Position
 }
 
 func (c *Context) convertValue(file *ast.File, tv typeAndVal, selfType, targetType types.Type, p *types.Package, adjuster posAdjuster) (av AnnotationValue, err error) {
 	av, err = c.tryConvertValue(file, tv, selfType, targetType, p, adjuster)
 	if wte, ok := err.(wrongTypeError); ok {
-		ntyp, typ := GetUnderlyingType(targetType)
+		ntyp, typ := getUnderlyingType(targetType)
 		var elemType types.Type
 		var fld *types.Var
 		switch t := typ.(type) {
@@ -1342,7 +1501,13 @@ func (c *Context) convertValue(file *ast.File, tv typeAndVal, selfType, targetTy
 }
 
 func (c *Context) tryConvertValue(file *ast.File, tv typeAndVal, selfType, targetType types.Type, p *types.Package, adjuster posAdjuster) (av AnnotationValue, err error) {
-	ntyp, typ := GetUnderlyingType(targetType)
+	defer func() {
+		if err == nil {
+			av.Ref = tv.ref
+		}
+	}()
+
+	ntyp, typ := getUnderlyingType(targetType)
 
 	var sourceType string
 
@@ -1690,10 +1855,12 @@ func assignableToSpecial(from, to, selfType types.Type, insideOfFunction bool) b
 	return false
 }
 
+// IsAnyType returns true if the given type is annogo.AnyType.
 func IsAnyType(t types.Type) bool {
 	return isNamedType(t, anyTypePkg, anyTypeName)
 }
 
+// IsSelfType returns true if the given type is annogo.SelfType.
 func IsSelfType(t types.Type) bool {
 	return isNamedType(t, selfTypePkg, selfTypeName)
 }
@@ -1909,7 +2076,7 @@ func (c *Context) convertStructValue(file *ast.File, v []parser.Element, pos tok
 
 		for _, fld := range fields {
 			var fieldAnnos []AnnotationMirror
-			if ae := c.AllElements[fld]; ae != nil {
+			if ae := c.AllElementsByObject[fld]; ae != nil {
 				fieldAnnos = ae.Annotations
 			} else if named, ok := nt.(*types.Named); ok {
 				// named type has either not been processed yet or is in a
@@ -2123,43 +2290,6 @@ func (c *Context) GetValue(av AnnotationValue, forceArray bool) interface{} {
 	}
 }
 
-func (c *Context) findConstantValue(con *types.Const) (interface{}, bool) {
-	if b, ok := con.Type().(*types.Basic); ok && b.Kind() == types.UntypedNil {
-		return nil, true
-	}
-	val := con.Val()
-	if val != nil {
-		switch val.Kind() {
-		case constant.Int:
-			if constant.Sign(val) < 0 {
-				if i, ok := constant.Int64Val(val); ok {
-					return i, true
-				}
-			} else {
-				if u, ok := constant.Uint64Val(val); ok {
-					return u, true
-				}
-			}
-		case constant.Float:
-			if f, ok := constant.Float64Val(val); ok {
-				return f, true
-			}
-		case constant.Complex:
-			if r, ok := constant.Float64Val(constant.Real(val)); ok {
-				if i, ok := constant.Float64Val(constant.Imag(val)); ok {
-					return complex(r, i), true
-				}
-			}
-		case constant.String:
-			return constant.StringVal(val), true
-		case constant.Bool:
-			return constant.BoolVal(val), true
-		}
-	}
-	// invalid or missing value
-	return nil, false
-}
-
 func isExported(name string) bool {
 	r, _ := utf8.DecodeRuneInString(name)
 	if r == utf8.RuneError {
@@ -2195,7 +2325,7 @@ func (c *Context) convertType(file *ast.File, t parser.Type, adjuster posAdjuste
 		return types.NewMap(k, v), nil
 
 	case t.IsArray():
-		exptyp, v, err := c.getExpressionValue(file, t.Len(), adjuster)
+		exptyp, v, _, err := c.getExpressionValue(file, t.Len(), adjuster)
 		if err != nil {
 			return nil, err
 		}
@@ -2292,7 +2422,7 @@ func (c *Context) convertType(file *ast.File, t parser.Type, adjuster posAdjuste
 	}
 }
 
-func GetUnderlyingType(t types.Type) (named types.Type, underlying types.Type) {
+func getUnderlyingType(t types.Type) (named types.Type, underlying types.Type) {
 	nt := t
 	for {
 		t = nt.Underlying()
@@ -2305,11 +2435,26 @@ func GetUnderlyingType(t types.Type) (named types.Type, underlying types.Type) {
 	return nt, t
 }
 
+var typeOfEmptyInterface = reflect.TypeOf((*interface{})(nil)).Elem()
+
 func asArray(slice reflect.Value) reflect.Value {
 	if slice.Kind() != reflect.Slice {
 		panic(fmt.Sprintf("argument must be a slice, instead was %v", slice.Type()))
 	}
-	array := reflect.Zero(reflect.ArrayOf(slice.Len(), slice.Type().Elem()))
+
+	elemType := slice.Type().Elem()
+	if elemType.Kind() == reflect.Slice {
+		// Since purpose of converting to array is to use as map key, we must
+		// recursively convert contents when elements are also slices. But then
+		// we cannot necessarily compute a single element type, since the
+		// lengths of nested slices may have heterogenous lengths (and arrays
+		// with different lengths are necessarily different types, regardless of
+		// whether they have the same element type or not). So for this case, we
+		// use interface{} as the element type of the result
+		elemType = typeOfEmptyInterface
+	}
+
+	array := reflect.Zero(reflect.ArrayOf(slice.Len(), elemType))
 	for i := 0; i < slice.Len(); i++ {
 		e := slice.Index(i)
 		if e.Kind() == reflect.Slice {

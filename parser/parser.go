@@ -1,3 +1,5 @@
+// Package parser implements a parser for Go annotations. The results of parsing
+// are AST representations of annotations that include location information.
 package parser
 
 import (
@@ -102,24 +104,39 @@ func newLexer(filename string, r io.Reader) *annoLex {
 	return &l
 }
 
+// ParseError is an error type that includes position information about where
+// the error was encountered in source.
 type ParseError struct {
 	err error
 	pos scanner.Position
 }
 
+// Error implements the error interface. The message includes location
+// information.
 func (e *ParseError) Error() string {
-	return fmt.Sprintf("line %d, column %d: %s", e.pos.Line, e.pos.Column, e.err)
+	return fmt.Sprintf("%s:%d:%d: %s", e.pos.Filename, e.pos.Line, e.pos.Column, e.err)
 }
 
+// Underlying returns the underlying error.
 func (e *ParseError) Underlying() error {
 	return e.err
 }
 
+// Pos returns the position in source where the underlying error was
+// encountered.
 func (e *ParseError) Pos() scanner.Position {
 	return e.pos
 }
 
-func ParseAnnotations(filename string, r io.Reader) ([]Annotation, *ParseError) {
+// ParseAnnotations parses annotations from the given reader. The given file
+// name is used to display locations in errors. If an error is returned, it
+// will be of type *ParseError.
+//
+// The contents of the reader should be zero or more annotation values,
+// separated by newlines or semicolons. A single value may span multiple lines
+// but uses the same rule as for Go expressions spanning multiple lines (e.g. a
+// line break is only allowed after certain characters, such as '(' and ',').
+func ParseAnnotations(filename string, r io.Reader) ([]Annotation, error) {
 	l := newLexer(filename, r)
 	annotationsParse(l)
 	if l.err != nil {
@@ -232,12 +249,11 @@ func (l *annoLex) Lex(lval *annotationsSymType) (t int) {
 					v := constant.MakeFromLiteral(tok+"i", token.IMAG, 0)
 					lval.l = LiteralNode{Val: v, pos: pos}
 					return _IMAG_LIT
-				} else {
-					// make sure we get this token next time
-					l.nextRune = nr
-					l.nextTok = nt
-					l.nextPos = np
 				}
+				// make sure we get this token next time
+				l.nextRune = nr
+				l.nextTok = nt
+				l.nextPos = np
 			}
 			v := constant.MakeFromLiteral(tok, token.INT, 0)
 			lval.l = LiteralNode{Val: v, pos: pos}
@@ -253,12 +269,11 @@ func (l *annoLex) Lex(lval *annotationsSymType) (t int) {
 					v := constant.MakeFromLiteral(tok+"i", token.IMAG, 0)
 					lval.l = LiteralNode{Val: v, pos: pos}
 					return _IMAG_LIT
-				} else {
-					// make sure we get this token next time
-					l.nextRune = nr
-					l.nextTok = nt
-					l.nextPos = np
 				}
+				// make sure we get this token next time
+				l.nextRune = nr
+				l.nextTok = nt
+				l.nextPos = np
 			}
 			v := constant.MakeFromLiteral(tok, token.FLOAT, 0)
 			lval.l = LiteralNode{Val: v, pos: pos}
@@ -266,7 +281,7 @@ func (l *annoLex) Lex(lval *annotationsSymType) (t int) {
 
 		case scanner.Char:
 			v := constant.MakeFromLiteral(tok, token.CHAR, 0)
-			lval.l = LiteralNode{Val: v, pos: pos}
+			lval.l = LiteralNode{Val: v, pos: pos, IsRune: true}
 			return _RUNE_LIT
 
 		case scanner.String, scanner.RawString:

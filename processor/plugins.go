@@ -14,7 +14,7 @@ func RegisterProcessor(p Processor) {
 	registeredPlugins = append(registeredPlugins, p)
 }
 
-// AllRegisteredProcessor returns the list of all registered processors.
+// AllRegisteredProcessors returns the list of all registered processors.
 func AllRegisteredProcessors() []Processor {
 	registryLock.Lock()
 	defer registryLock.Unlock()

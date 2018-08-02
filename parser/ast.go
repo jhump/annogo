@@ -24,8 +24,13 @@ type nameNode struct {
 type LiteralNode struct {
 	Val constant.Value // nil if literal nil
 	pos scanner.Position
+
+	// If Val is an int, original literal could have been a numeric literal
+	// or a rune literal. This allows for distinguishing between the two.
+	IsRune bool
 }
 
+// Pos returns the position of this node in the source.
 func (n LiteralNode) Pos() scanner.Position {
 	return n.pos
 }
@@ -36,6 +41,7 @@ type RefNode struct {
 	Ident Identifier
 }
 
+// Pos returns the position of this node in the source.
 func (n RefNode) Pos() scanner.Position {
 	return n.Ident.Pos
 }
@@ -49,6 +55,7 @@ type BinaryOperatorNode struct {
 	OperatorPos scanner.Position
 }
 
+// Pos returns the position of this node in the source.
 func (n BinaryOperatorNode) Pos() scanner.Position {
 	return n.Left.Pos()
 }
@@ -60,6 +67,7 @@ type ParenthesizedExpressionNode struct {
 	pos      scanner.Position
 }
 
+// Pos returns the position of this node in the source.
 func (n ParenthesizedExpressionNode) Pos() scanner.Position {
 	return n.pos
 }
@@ -71,6 +79,7 @@ type TypedExpressionNode struct {
 	Value ExpressionNode
 }
 
+// Pos returns the position of this node in the source.
 func (n TypedExpressionNode) Pos() scanner.Position {
 	return n.Type.Pos()
 }
@@ -83,6 +92,7 @@ type PrefixOperatorNode struct {
 	pos      scanner.Position
 }
 
+// Pos returns the position of this node in the source.
 func (n PrefixOperatorNode) Pos() scanner.Position {
 	return n.pos
 }
@@ -95,6 +105,7 @@ type InvokeRealNode struct {
 	pos      scanner.Position
 }
 
+// Pos returns the position of this node in the source.
 func (n InvokeRealNode) Pos() scanner.Position {
 	return n.pos
 }
@@ -107,6 +118,7 @@ type InvokeImagNode struct {
 	pos      scanner.Position
 }
 
+// Pos returns the position of this node in the source.
 func (n InvokeImagNode) Pos() scanner.Position {
 	return n.pos
 }
@@ -120,6 +132,7 @@ type InvokeComplexNode struct {
 	pos              scanner.Position
 }
 
+// Pos returns the position of this node in the source.
 func (n InvokeComplexNode) Pos() scanner.Position {
 	return n.pos
 }
@@ -131,6 +144,7 @@ type AggregateNode struct {
 	pos      scanner.Position
 }
 
+// Pos returns the position of this node in the source.
 func (n AggregateNode) Pos() scanner.Position {
 	return n.pos
 }
@@ -143,12 +157,14 @@ type Identifier struct {
 	Pos          scanner.Position
 }
 
+// String implements the fmt.Stringer interface, returning the identifier as a
+// string. If the identifier includes a package qualifier, it is included in the
+// returned string.
 func (id Identifier) String() string {
 	if id.PackageAlias == "" {
 		return id.Name
-	} else {
-		return fmt.Sprintf("%s.%s", id.PackageAlias, id.Name)
 	}
+	return fmt.Sprintf("%s.%s", id.PackageAlias, id.Name)
 }
 
 // Element is an AST node for a component of an aggregate value. Aggregates that
@@ -161,12 +177,12 @@ type Element struct {
 	Value  ExpressionNode
 }
 
+// Pos returns the position of this node in the source.
 func (e Element) Pos() scanner.Position {
 	if e.HasKey {
 		return e.Key.Pos()
-	} else {
-		return e.Value.Pos()
 	}
+	return e.Value.Pos()
 }
 
 // Annotation is a fully parsed annotation. It identifies the annotation type
