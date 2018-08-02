@@ -1,7 +1,6 @@
 package annogo
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -30,6 +29,12 @@ type ValueDesc struct {
 	ValueName   string
 }
 
+// TODO: also need to store map of uintptr to interface{} that
+// maps pointer of adapter function to the actual wrapped function
+// (for cases where adapter function must be created to adapt
+// SelfType or AnyType in annotation field signature); need to
+// provide exported API, GetUnderlyingFunction, for querying it
+
 type annosMap map[reflect.Type][]reflect.Value
 type namedElementAnnos map[string]map[string]annosMap
 
@@ -38,7 +43,6 @@ type typeAnnos struct {
 	fieldAnnotations       map[string]annosMap
 	ifaceMethodAnnotations map[string]annosMap
 	ifaceEmbedsAnnotations map[reflect.Type]annosMap
-	enumValueAnnotations   map[string]annosMap
 }
 
 // RegisterFunctionAnnotation records the given annotations for the given
@@ -708,7 +712,6 @@ func GetAnnotationsForInterfaceEmbed(t, embedType, annoType reflect.Type) []refl
 	if !IsAnnotationType(annoType) {
 		panic(fmt.Sprintf("given type is not an annotation type: %v", annoType))
 	}
-	errors.New("This is an error.")
 
 	registryMu.RLock()
 	defer registryMu.RUnlock()
@@ -831,6 +834,9 @@ func checkAnnotation(annoType reflect.Type, annotation interface{}, allowBootstr
 	return anno
 }
 
+// IsAnnotationType determines if the given type can be used as an annotation.
+// Annotation types are those that are themselves annotated with
+// annogo.Annotation.
 func IsAnnotationType(t reflect.Type) bool {
 	annos := typeAnnotations[t]
 	if annos == nil {

@@ -119,7 +119,9 @@ const (
 	Fields
 
 	// Methods are method elements. Only methods of top-level, named types
-	// can be annotated.
+	// can be annotated. This element type only applies to methods that have
+	// bodies: interface methods are not allowed unless InterfaceMethods is also
+	// used.
 	Methods
 
 	// InterfaceMethods are the methods that comprise an interface. Only methods
@@ -195,8 +197,8 @@ func (et ElementType) String() string {
 //      appear to be heterogenous since types are strictly inferred from the
 //      constants in the annotation data. So if one element has a field named
 //      "Foo" and an unsigned integer value, but another has a field of the same
-//      name with signed (e.g. negative) integer value, they will be interpreted
-//      as heterogenous elements. Similarly, arrays of arrays appear
+//      name with a signed (e.g. negative) integer value, they will be
+//      interpreted as heterogenous elements. Similarly, arrays of arrays appear
 //      heterogenous if the elements have different lengths. (AnyType values
 //      do not use slices, only arrays.)
 //   6. Maps whose keys and values are of any supported type. Like any other map
@@ -206,7 +208,7 @@ func (et ElementType) String() string {
 //      can appear heterogenous even when that is not the intent.
 //
 // Note that this marker type can also be used inside function types and has a
-// similar special meaning in that context. For example, consider the following
+// special meaning in that context. For example, consider the following
 // annotation type:
 //
 //    // @annogo.Annotation
@@ -217,18 +219,18 @@ func (et ElementType) String() string {
 //
 // In this case, an annotation value can refer to any function that accepts a
 // string and returns one value, regardless of the actual return type, for the
-// field named "Make". Similarly, the value can refer to any function that
-// accepts a map with string keys and returns error, regardless of the map's
-// value type, for the field named "Registry". Note that channels of, pointers
-// to, and structs with AnyTypes are not supported this way; only array, slice,
-// and map types are.
+// field named "Make". Similarly, the value for the field named "Registry" can
+// refer to any function that accepts a map with string keys and returns error,
+// regardless of the map's value type. Note that channels of, pointers to, and
+// structs with AnyTypes are not supported this way; only array, slice, and map
+// types are.
 //
 // When used this way, the actual underlying function and its signature type can
-// be queried using GetFunctionDetails. The actual annotation value will be a
-// synthetic function that delegates to the correct one. For functions that
-// accept or return an array, slice, or map type that references AnyType, the
-// synthetic function will have to copy the arguments/return values to translate
-// between the declared and actual signatures.
+// be queried using annogo.GetUnderlyingFunction. The actual annotation value
+// will be a synthetic function that delegates to the correct one. For functions
+// that accept or return an array, slice, or map type that references AnyType,
+// the synthetic function will have to copy the arguments/return values to
+// translate between the declared and actual signatures.
 type AnyType interface{}
 
 // SelfType is a special marker type. When an annotation is a struct that

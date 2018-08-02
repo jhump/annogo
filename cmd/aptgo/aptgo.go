@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"go/types"
 	"os"
-	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
-	"strings"
 
 	"github.com/jhump/annogo"
 	"github.com/jhump/annogo/processor"
@@ -37,48 +34,10 @@ func main() {
 		}
 	}
 
-	outputs := map[string]string{}
-	for _, pkg := range flag.Args() {
-		out, err := determineOutputDir(*outputDir, pkg)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err.Error())
-			os.Exit(1)
-		}
-		outputs[pkg] = out
+	if err := processor.ProcessAll(flag.Args(), *test, *outputDir); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
 	}
-
-	for _, pkg := range flag.Args() {
-		if err := processor.ProcessAll(pkg, *test, outputs[pkg]); err != nil {
-			fmt.Fprintln(os.Stderr, err.Error())
-			os.Exit(1)
-		}
-	}
-}
-
-func determineOutputDir(root, pkgPath string) (string, error) {
-	if root != "" {
-		out := filepath.Join(root, "src", pkgPath)
-		if err := os.MkdirAll(out, os.ModePerm); err != nil {
-			return "", fmt.Errorf("could not create output directory %s: %s", out, err.Error())
-		}
-		return out, nil
-	}
-	gopaths := os.Getenv("GOPATH")
-	if gopaths != "" {
-		for _, gopath := range strings.Split(gopaths, string(filepath.ListSeparator)) {
-			out := filepath.Join(gopath, "src", pkgPath)
-			_, err := os.Stat(out)
-			if err == nil {
-				return out, nil
-			}
-		}
-	}
-	out := filepath.Join(runtime.GOROOT(), "src", pkgPath)
-	_, err := os.Stat(out)
-	if err == nil {
-		return "", fmt.Errorf("cannot generate output for package %q because it is in GOROOT", pkgPath)
-	}
-	return "", fmt.Errorf("could not determine output directory for package %q", pkgPath)
 }
 
 func init() {
@@ -97,7 +56,7 @@ func isSameType(t1 reflect.Type, t2 *types.TypeName) bool {
 	return t1.PkgPath() == t2.Pkg().Path() && t1.Name() == t2.Name()
 }
 
-func baseProcessor(context *processor.Context, outputDir string) error {
+func baseProcessor(context *processor.Context, output processor.OutputFactory) error {
 	if context.NumElements() == 0 {
 		// nothing to do!
 		return nil
@@ -122,6 +81,10 @@ func baseProcessor(context *processor.Context, outputDir string) error {
 	})
 
 	outputPkg := context.Package.Pkg
+	// TODO: need to generate separate "<pkg>.annos_test.go" and
+	// "<pkg>_test.annos_test.go" files if the given annotations include
+	// test code (which can be determined by inspecting the package and file
+	// details of the annotated elements).
 	file := gopoet.NewGoFile(fmt.Sprintf("%s.annos.go", outputPkg.Name()), outputPkg.Path(), outputPkg.Name())
 
 	// we always reference this package, to call the Register* functions
@@ -175,11 +138,7 @@ func baseProcessor(context *processor.Context, outputDir string) error {
 	}
 	file.AddElement(initFunc)
 
-	out, err := os.OpenFile(filepath.Join(outputDir, file.Name), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
-	if err != nil {
-		return err
-	}
-	return gopoet.WriteGoFile(out, file)
+	return gopoet.WriteGoFiles(output, file)
 }
 
 func generateAnnotationValueDecl(out *gopoet.CodeBlock, name string, val processor.AnnotationValue) {
@@ -277,6 +236,12 @@ func generateAnnotationValue(out, curr *gopoet.CodeBlock, base string, requireCo
 		}
 
 	case *types.Signature:
+		// TODO: due to presence of annogo.AnyType or annogo.SelfType, it is
+		// possible for the named function to have mismatching type, in which
+		// case we need to generate an anonymous function here that adapts the
+		// signature. If any array, slice, or map values need to be adapted,
+		// they will need to be copied (possibly recursively) to convert the
+		// value to the correct type
 		curr.Printf("%s", val.AsFunc())
 
 	case *types.Array, *types.Slice:

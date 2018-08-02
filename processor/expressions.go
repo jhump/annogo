@@ -82,10 +82,9 @@ func getConstantValue(t types.Type, v constant.Value) interface{} {
 		if constant.Sign(v) < 0 {
 			r, _ := constant.Int64Val(v)
 			return r
-		} else {
-			r, _ := constant.Uint64Val(v)
-			return r
 		}
+		r, _ := constant.Uint64Val(v)
+		return r
 	}
 	if isFloat(t) {
 		if v.Kind() == constant.Unknown {
@@ -459,7 +458,7 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		realPos := adjuster.adjustPosition(node.RealArg.Pos())
 		imagPos := adjuster.adjustPosition(node.ImagArg.Pos())
 
-		if !constAssignableTo(rt, it) && !constAssignableTo(rt, it) {
+		if !constAssignableTo(rt, it) && !constAssignableTo(it, rt) {
 			return nil, nil, nil, posError(pos, fmt.Errorf("incompatible types: %v and %v", rt, it))
 		}
 		if !isFloat(rt) && !constAssignableTo(rt, typeFloat64) && !constAssignableTo(rt, typeFloat32) {
