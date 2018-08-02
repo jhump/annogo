@@ -1,8 +1,11 @@
 # Anno-Go
-
-## Still Under Construction!
+[![Build Status](https://travis-ci.org/jhump/annogo.svg?branch=master)](https://travis-ci.org/jhump/annogo)
+[![Go Report Card](https://goreportcard.com/badge/github.com/jhump/annogo)](https://goreportcard.com/report/github.com/jhump/annogo)
+[![GoDoc](https://godoc.org/github.com/jhump/annogo?status.svg)](https://godoc.org/github.com/jhump/annogo)
 
 Annotations and annotation processing for Go!
+
+### NOTE: Still Under Construction!
 
 ## Annotations
 
