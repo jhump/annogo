@@ -3,14 +3,14 @@ package parser
 
 import __yyfmt__ "fmt"
 
-//line annotations.y:3
+//line annotations.y:2
 import (
 	"go/constant"
 	"math"
 	"text/scanner"
 )
 
-//line annotations.y:15
+//line annotations.y:14
 type annotationsSymType struct {
 	yys int
 	n   nameNode
@@ -124,7 +124,7 @@ const annotationsEofCode = 1
 const annotationsErrCode = 2
 const annotationsInitialStackSize = 16
 
-//line annotations.y:305
+//line annotations.y:304
 
 //line yacctab:1
 var annotationsExca = [...]int{
@@ -647,157 +647,157 @@ annotationsdefault:
 
 	case 1:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:57
+		//line annotations.y:56
 		{
 			annotationsVAL.an = annotationsDollar[1].an
 			annotationslex.(*annoLex).res = annotationsVAL.an
 		}
 	case 2:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:61
+		//line annotations.y:60
 		{
 			annotationsVAL.an = annotationsDollar[2].an
 			annotationslex.(*annoLex).res = annotationsVAL.an
 		}
 	case 3:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:65
+		//line annotations.y:64
 		{
 			annotationsVAL.an = append(annotationsDollar[1].an, annotationsDollar[3].an...)
 			annotationslex.(*annoLex).res = annotationsVAL.an
 		}
 	case 4:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:69
+		//line annotations.y:68
 		{
 			annotationsVAL.an = annotationsDollar[1].an
 			annotationslex.(*annoLex).res = annotationsVAL.an
 		}
 	case 5:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:73
+		//line annotations.y:72
 		{
 			annotationsVAL.an = append(annotationsDollar[1].an, annotationsDollar[3].an...)
 			annotationslex.(*annoLex).res = annotationsVAL.an
 		}
 	case 6:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:77
+		//line annotations.y:76
 		{
 			annotationsVAL.an = annotationsDollar[1].an
 			annotationslex.(*annoLex).res = annotationsVAL.an
 		}
 	case 7:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:82
+		//line annotations.y:81
 		{
 			annotationsVAL.an = []Annotation{{Type: annotationsDollar[2].id, Pos: annotationsDollar[1].p}}
 		}
 	case 8:
 		annotationsDollar = annotationsS[annotationspt-5 : annotationspt+1]
-		//line annotations.y:85
+		//line annotations.y:84
 		{
 			annotationsVAL.an = []Annotation{{Type: annotationsDollar[2].id, Value: annotationsDollar[4].v, Pos: annotationsDollar[1].p}}
 		}
 	case 9:
 		annotationsDollar = annotationsS[annotationspt-5 : annotationspt+1]
-		//line annotations.y:88
+		//line annotations.y:87
 		{
 			annotationsVAL.an = []Annotation{{Type: annotationsDollar[2].id, Value: AggregateNode{Contents: annotationsDollar[4].els, pos: annotationsDollar[3].p}, Pos: annotationsDollar[1].p}}
 		}
 	case 10:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:92
+		//line annotations.y:91
 		{
 			annotationsVAL.id = Identifier{Name: annotationsDollar[1].n.Val, Pos: annotationsDollar[1].n.Pos}
 		}
 	case 11:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:95
+		//line annotations.y:94
 		{
 			annotationsVAL.id = Identifier{PackageAlias: annotationsDollar[1].n.Val, Name: annotationsDollar[3].n.Val, Pos: annotationsDollar[1].n.Pos}
 		}
 	case 12:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:99
+		//line annotations.y:98
 		{
 			annotationsVAL.v = AggregateNode{Contents: annotationsDollar[2].els, pos: annotationsDollar[1].p}
 		}
 	case 14:
 		annotationsDollar = annotationsS[annotationspt-4 : annotationspt+1]
-		//line annotations.y:103
+		//line annotations.y:102
 		{
 			annotationsVAL.v = TypedExpressionNode{Type: annotationsDollar[1].t, Value: AggregateNode{Contents: annotationsDollar[3].els, pos: annotationsDollar[2].p}}
 		}
 	case 16:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:108
+		//line annotations.y:107
 		{
 			annotationsVAL.t = sliceType{elem: annotationsDollar[3].t, pos: annotationsDollar[1].p}
 		}
 	case 17:
 		annotationsDollar = annotationsS[annotationspt-5 : annotationspt+1]
-		//line annotations.y:111
+		//line annotations.y:110
 		{
 			annotationsVAL.t = mapType{key: annotationsDollar[3].t, elem: annotationsDollar[5].t, pos: annotationsDollar[1].p}
 		}
 	case 18:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:115
+		//line annotations.y:114
 		{
 			annotationsVAL.t = namedType{name: annotationsDollar[1].id}
 		}
 	case 19:
 		annotationsDollar = annotationsS[annotationspt-4 : annotationspt+1]
-		//line annotations.y:118
+		//line annotations.y:117
 		{
 			annotationsVAL.t = arrayType{len: annotationsDollar[2].v, elem: annotationsDollar[4].t, pos: annotationsDollar[1].p}
 		}
 	case 26:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:130
+		//line annotations.y:129
 		{
 			annotationsVAL.t = emptyType{isStruct: true, pos: annotationsDollar[1].p}
 		}
 	case 27:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:133
+		//line annotations.y:132
 		{
 			annotationsVAL.t = emptyType{isStruct: false, pos: annotationsDollar[1].p}
 		}
 	case 28:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:137
+		//line annotations.y:136
 		{
 			annotationsVAL.t = pointerType{pos: annotationsDollar[1].p, elem: annotationsDollar[2].t}
 		}
 	case 29:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:141
+		//line annotations.y:140
 		{
 			annotationsVAL.v = LiteralNode{pos: annotationsDollar[1].p} // leave val nil
 		}
 	case 30:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:144
+		//line annotations.y:143
 		{
 			annotationsVAL.v = LiteralNode{Val: constant.MakeBool(true), pos: annotationsDollar[1].p}
 		}
 	case 31:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:147
+		//line annotations.y:146
 		{
 			annotationsVAL.v = LiteralNode{Val: constant.MakeBool(false), pos: annotationsDollar[1].p}
 		}
 	case 33:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:152
+		//line annotations.y:151
 		{
 			annotationsVAL.els = []Element{annotationsDollar[1].el}
 		}
 	case 34:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:155
+		//line annotations.y:154
 		{
 			if annotationsDollar[1].els[0].HasKey != annotationsDollar[3].el.HasKey {
 				annotationslex.Error("element list cannot contain a mix of map and array style elements (e.g. with and without key)")
@@ -806,265 +806,265 @@ annotationsdefault:
 		}
 	case 35:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:161
+		//line annotations.y:160
 		{
 			annotationsVAL.els = annotationsDollar[1].els
 		}
 	case 36:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:165
+		//line annotations.y:164
 		{
 			annotationsVAL.el = Element{Value: annotationsDollar[1].v}
 		}
 	case 38:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:170
+		//line annotations.y:169
 		{
 			annotationsVAL.el = Element{Key: annotationsDollar[1].v, HasKey: true, Value: annotationsDollar[3].v}
 		}
 	case 39:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:174
+		//line annotations.y:173
 		{
 			annotationsVAL.v = RefNode{Ident: annotationsDollar[1].id}
 		}
 	case 40:
 		annotationsDollar = annotationsS[annotationspt-4 : annotationspt+1]
-		//line annotations.y:177
+		//line annotations.y:176
 		{
 			annotationsVAL.v = TypedExpressionNode{Type: namedType{name: annotationsDollar[1].id}, Value: annotationsDollar[3].v}
 		}
 	case 41:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:180
+		//line annotations.y:179
 		{
 			annotationsVAL.v = annotationsDollar[1].v
 		}
 	case 42:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:183
+		//line annotations.y:182
 		{
 			annotationsVAL.v = annotationsDollar[1].l
 		}
 	case 43:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:186
+		//line annotations.y:185
 		{
 			annotationsVAL.v = annotationsDollar[1].l
 		}
 	case 44:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:189
+		//line annotations.y:188
 		{
 			annotationsVAL.v = annotationsDollar[1].l
 		}
 	case 45:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:192
+		//line annotations.y:191
 		{
 			annotationsVAL.v = ParenthesizedExpressionNode{Contents: annotationsDollar[2].v, pos: annotationsDollar[1].p}
 		}
 	case 46:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:195
+		//line annotations.y:194
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "+", OperatorPos: annotationsDollar[2].p}
 		}
 	case 47:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:198
+		//line annotations.y:197
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "-", OperatorPos: annotationsDollar[2].p}
 		}
 	case 48:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:201
+		//line annotations.y:200
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "*", OperatorPos: annotationsDollar[2].p}
 		}
 	case 49:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:204
+		//line annotations.y:203
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "/", OperatorPos: annotationsDollar[2].p}
 		}
 	case 50:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:207
+		//line annotations.y:206
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "%", OperatorPos: annotationsDollar[2].p}
 		}
 	case 51:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:210
+		//line annotations.y:209
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "<<", OperatorPos: annotationsDollar[2].p}
 		}
 	case 52:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:213
+		//line annotations.y:212
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: ">>", OperatorPos: annotationsDollar[2].p}
 		}
 	case 53:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:216
+		//line annotations.y:215
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "^", OperatorPos: annotationsDollar[2].p}
 		}
 	case 54:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:219
+		//line annotations.y:218
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "&", OperatorPos: annotationsDollar[2].p}
 		}
 	case 55:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:222
+		//line annotations.y:221
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "|", OperatorPos: annotationsDollar[2].p}
 		}
 	case 56:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:225
+		//line annotations.y:224
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "&^", OperatorPos: annotationsDollar[2].p}
 		}
 	case 57:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:228
+		//line annotations.y:227
 		{
 			annotationsVAL.v = PrefixOperatorNode{Value: annotationsDollar[2].v, Operator: "^", pos: annotationsDollar[1].p}
 		}
 	case 58:
 		annotationsDollar = annotationsS[annotationspt-4 : annotationspt+1]
-		//line annotations.y:231
+		//line annotations.y:230
 		{
 			annotationsVAL.v = InvokeRealNode{Argument: annotationsDollar[3].v, pos: annotationsDollar[1].p}
 		}
 	case 59:
 		annotationsDollar = annotationsS[annotationspt-4 : annotationspt+1]
-		//line annotations.y:234
+		//line annotations.y:233
 		{
 			annotationsVAL.v = InvokeImagNode{Argument: annotationsDollar[3].v, pos: annotationsDollar[1].p}
 		}
 	case 60:
 		annotationsDollar = annotationsS[annotationspt-6 : annotationspt+1]
-		//line annotations.y:237
+		//line annotations.y:236
 		{
 			annotationsVAL.v = InvokeComplexNode{RealArg: annotationsDollar[3].v, ImagArg: annotationsDollar[5].v, pos: annotationsDollar[1].p}
 		}
 	case 61:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:240
+		//line annotations.y:239
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "&&", OperatorPos: annotationsDollar[2].p}
 		}
 	case 62:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:243
+		//line annotations.y:242
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "||", OperatorPos: annotationsDollar[2].p}
 		}
 	case 63:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:246
+		//line annotations.y:245
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "==", OperatorPos: annotationsDollar[2].p}
 		}
 	case 64:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:249
+		//line annotations.y:248
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "!=", OperatorPos: annotationsDollar[2].p}
 		}
 	case 65:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:252
+		//line annotations.y:251
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: ">", OperatorPos: annotationsDollar[2].p}
 		}
 	case 66:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:255
+		//line annotations.y:254
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "<", OperatorPos: annotationsDollar[2].p}
 		}
 	case 67:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:258
+		//line annotations.y:257
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: ">=", OperatorPos: annotationsDollar[2].p}
 		}
 	case 68:
 		annotationsDollar = annotationsS[annotationspt-3 : annotationspt+1]
-		//line annotations.y:261
+		//line annotations.y:260
 		{
 			annotationsVAL.v = BinaryOperatorNode{Left: annotationsDollar[1].v, Right: annotationsDollar[3].v, Operator: "<=", OperatorPos: annotationsDollar[2].p}
 		}
 	case 69:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:264
+		//line annotations.y:263
 		{
 			annotationsVAL.v = PrefixOperatorNode{Value: annotationsDollar[2].v, Operator: "!", pos: annotationsDollar[1].p}
 		}
 	case 70:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:267
+		//line annotations.y:266
 		{
 			annotationsVAL.v = PrefixOperatorNode{Value: annotationsDollar[2].v, Operator: "-", pos: annotationsDollar[1].p}
 		}
 	case 74:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:275
+		//line annotations.y:274
 		{
 			annotationsVAL.v = annotationsDollar[1].l
 		}
 	case 75:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:278
+		//line annotations.y:277
 		{
 			annotationsVAL.v = annotationsDollar[2].l
 		}
 	case 76:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:282
+		//line annotations.y:281
 		{
 			annotationsVAL.v = annotationsDollar[1].l
 		}
 	case 77:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:285
+		//line annotations.y:284
 		{
 			annotationsVAL.v = LiteralNode{Val: annotationsDollar[2].l.Val, pos: annotationsDollar[1].p}
 		}
 	case 78:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:288
+		//line annotations.y:287
 		{
 			annotationsVAL.v = LiteralNode{Val: constant.MakeUnknown(), pos: annotationsDollar[1].p}
 		}
 	case 79:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:291
+		//line annotations.y:290
 		{
 			annotationsVAL.v = LiteralNode{Val: constant.MakeFloat64(math.Inf(1)), pos: annotationsDollar[1].p}
 		}
 	case 80:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:294
+		//line annotations.y:293
 		{
 			annotationsVAL.v = LiteralNode{Val: constant.MakeFloat64(math.Inf(1)), pos: annotationsDollar[1].p}
 		}
 	case 81:
 		annotationsDollar = annotationsS[annotationspt-1 : annotationspt+1]
-		//line annotations.y:298
+		//line annotations.y:297
 		{
 			annotationsVAL.v = annotationsDollar[1].l
 		}
 	case 82:
 		annotationsDollar = annotationsS[annotationspt-2 : annotationspt+1]
-		//line annotations.y:301
+		//line annotations.y:300
 		{
 			annotationsVAL.v = LiteralNode{Val: annotationsDollar[2].l.Val, pos: annotationsDollar[1].p}
 		}
