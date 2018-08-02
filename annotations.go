@@ -26,13 +26,13 @@ import "fmt"
 // Annotations on constructs defined inside of function and method bodies
 // (types and fields thereof) are not allowed.
 //
-// @Annotation{AllowedElements: Types}
+//   @Annotation{AllowedElements: Types}
 type Annotation struct {
 	// RuntimeVisible indicates that the annotation is queryable at runtime
 	// using APIs in this package. This field is effectively ignored if
 	// AllowedElements disallows all element types.
 	//
-	// @DefaultValue(true)
+	//   @DefaultValue(true)
 	RuntimeVisible bool
 
 	// AllowedElements indicates the kinds of elements that can be annotated. If
@@ -54,16 +54,16 @@ type Annotation struct {
 // factory function since, to provide immutability, its fields/contents must be
 // unexported.
 //
-// @Annotation{AllowedElements: {Types, Fields}}
+//   @Annotation{AllowedElements: {Types, Fields}}
 type FactoryFunc func(AnyType) SelfType
 
 // DefaultValue is an annotation that indicates a default value for an
 // annotation field. It is not valid to use on types or methods. It is also not
 // valid to use with fields in structs that are not themselves annotations.
 //
-// @Annotation{AllowedElements: AnnotationFields}
+//   @Annotation{AllowedElements: AnnotationFields}
 type DefaultValue struct {
-	// @Required
+	//   @Required
 	Value SelfType
 }
 
@@ -74,7 +74,7 @@ type DefaultValue struct {
 // annotation is present, they may not assume a default value; the annotation
 // must explicitly define a value.
 //
-// @Annotation{AllowedElements: AnnotationFields}
+//   @Annotation{AllowedElements: AnnotationFields}
 type Required bool
 
 // ElementType is an enumeration of the kinds of elements that can be annotated.
