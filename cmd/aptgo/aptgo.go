@@ -145,6 +145,7 @@ func baseProcessor(context *processor.Context, output processor.OutputFactory) e
 }
 
 func generateAnnotationValueDecl(out *gopoet.CodeBlock, name string, val processor.AnnotationValue) {
+	//TODO: handle factory funcs (e.g. declare input and then declare result via function invocation)
 	var cb gopoet.CodeBlock
 	cb.Printf("%s := ", name)
 	generateAnnotationValue(out, &cb, name, true, true, val)
