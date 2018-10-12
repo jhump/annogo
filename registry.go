@@ -14,6 +14,7 @@ var (
 	varAnnotations       = map[reflect.Type]namedElementAnnos{}
 	varAnnotationsByAddr = map[uintptr]annosMap{}
 	typeAnnotations      = map[reflect.Type]*typeAnnos{}
+	adaptedFuncs         = map[uintptr]interface{}{}
 )
 
 // AnnotationValue describes a single annotation, its type and its value.
@@ -33,7 +34,7 @@ type ValueDesc struct {
 // maps pointer of adapter function to the actual wrapped function
 // (for cases where adapter function must be created to adapt
 // SelfType or AnyType in annotation field signature); need to
-// provide exported API, GetUnderlyingFunction, for querying it
+// provide exported API, GetUnderlyingFunction, for querying it.
 
 type annosMap map[reflect.Type][]reflect.Value
 type namedElementAnnos map[string]map[string]annosMap
@@ -721,6 +722,96 @@ func GetAnnotationsForInterfaceEmbed(t, embedType, annoType reflect.Type) []refl
 		return nil
 	}
 	return copyAll(typeAnnos.ifaceEmbedsAnnotations[embedType][annoType])
+}
+
+// RegisterAdaptedFunction is used to associated an underlying function with an
+// adapter function. An adapter function is one that may have instances of
+// annogo.AnyType or annogo.SelfType in its signature, whereas the underlying
+// function may have some other type in those same locations. Adapters are
+// created for annotation values that are functions where annogo.AnyType and/or
+// annogo.SelfType is in the annotation signature, but may not be in the
+// underlying function's signature.
+func RegisterAdaptedFunction(adapter, underlying interface{}) {
+	// double-check they have compatible signatures
+	rvAdapter := reflect.ValueOf(adapter)
+	if !compatibleAdapter(rvAdapter.Type(), reflect.TypeOf(underlying)) {
+		panic(fmt.Sprintf("given functions are not compatible: %T is not a valid adapter type for %T", adapter, underlying))
+	}
+	adaptedFuncs[rvAdapter.Pointer()] = underlying
+}
+
+// GetUnderlyingFunction retrieves the actual underlying function that is
+// wrapped by the given adapter function. If the given function is not known to
+// be an adapter for any function value used in an annotation, it is returned
+// as is (e.g. its underlying function is itself).
+//
+// Due to signature adaptation, the returned function may have a different
+// signature than the given function: occurrences of annogo.AnyType or
+// annogo.SelfType may be replaced with other types in the returned function's
+// signature.
+func GetUnderlyingFunction(fn interface{}) interface{} {
+	rv := reflect.ValueOf(fn)
+	if rv.Kind() != reflect.Func {
+		panic(fmt.Sprintf("can only query underlying function for adapter functions; given value is not a function: %T", fn))
+	}
+	underlying := adaptedFuncs[rv.Pointer()]
+	if underlying == nil {
+		return fn
+	}
+	return underlying
+}
+
+var typeOfAny = reflect.TypeOf((*AnyType)(nil))
+var typeOfSelf = reflect.TypeOf((*SelfType)(nil))
+
+func compatibleAdapter(adapter, underlying reflect.Type) bool {
+	if adapter == underlying {
+		return true
+	}
+	if adapter == typeOfAny || adapter == typeOfSelf {
+		return true
+	}
+	if adapter.Kind() != underlying.Kind() {
+		return false
+	}
+
+	switch adapter.Kind() {
+	case reflect.Func:
+		if adapter.NumIn() != underlying.NumIn() {
+			return false
+		}
+		if adapter.NumOut() != underlying.NumOut() {
+			return false
+		}
+		for i := 0; i < adapter.NumIn(); i++ {
+			if !compatibleAdapter(adapter.In(i), underlying.In(i)) {
+				return false
+			}
+		}
+		for i := 0; i < adapter.NumOut(); i++ {
+			if !compatibleAdapter(adapter.Out(i), underlying.Out(i)) {
+				return false
+			}
+		}
+		// signature is a match!
+		return true
+
+	case reflect.Map:
+		if !compatibleAdapter(adapter.Key(), underlying.Key()) {
+			return false
+		}
+		fallthrough
+	case reflect.Slice, reflect.Array:
+		if adapter.Kind() == reflect.Array && adapter.Len() != underlying.Len() {
+			return false
+		}
+		return compatibleAdapter(adapter.Elem(), underlying.Elem())
+
+	default:
+		// not a func, map, slice, or array? then types should be an
+		// exact match (which we've already checked, and they are not)
+		return false
+	}
 }
 
 func annotationValues(annos annosMap) []AnnotationValue {

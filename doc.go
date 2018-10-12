@@ -7,6 +7,198 @@
 // inspect runtime-visible annotation values (which were registered from said
 // generated code during package initialization).
 //
-// It also provides the foundational meta-annotations, which Go package authors
-// use to define their own annotations.
+// It also provides the foundational meta-annotations, which Go developers use
+// to define their own annotations.
+//
+// Annotation Syntax
+//
+// Annotations on constructs in Go source code take the form of
+// specially-formatted comments. At the end of normal Go doc, add annotations
+// by writing annotation values, starting with an at sign ("@") in front of
+// each annotation type (similar to annotation syntax in Java). Any comment line
+// that starts with such an at sign is assumed by annotation processors to be
+// the first line of annotations, and all comment lines following it are also
+// assumed to be part of the annotations.
+//
+// So, for packages with annotations (e.g. those on which you might run the
+// aptgo tool or other processing tools), it is important that no Go doc for any
+// element have a line that starts with the at sign ("@") unless that line is
+// the start of the doc'ed element's annotations.
+//
+// Like a statement in the Go language, an annotation should be all on a single
+// line or break lines after characters that do not break expressions (such as
+// open braces, open parentheses, binary operators, commas, etc).
+//
+//   // An annotation on a single line
+//   // @annogo.Annotation{AllowedElements: Types}
+//
+//   // An annotation that spans multiple lines
+//   // @annogo.Annotation{
+//   //     AllowedElements: Types, // not trailing comma, like in other Go code
+//   // }
+//
+// Multiple annotations go on multiple lines, though they can all be crammed on
+// a single line if they are separated with semicolons (again, like normal
+// statements in the Go language).
+//
+//   // Multiple annotations on multiple lines
+//   // @annogo.Required
+//   // @annogo.DefaultValue(123)
+//
+//   // Or multiple annotations on a single line
+//   // @annogo.Required; @annogo.DefaultValue(123)
+//
+// As seen in the examples above, a single annotation starts with the at sign
+// ("@") followed by the name of the annotation type, including a package
+// qualifier.
+//
+//   // @annogo.Annotation
+//
+// With just the annotation name, the annotation's value is its zero value with
+// one important exception: if the annotation type is a struct and it has any
+// field with a @annogo.DefaultValue annotation, that field will have the
+// specified default value (not the field's zero value).
+//
+// If the annotation type is a struct and has any fields with a @annogo.Required
+// annotation, values *must* be indicated in the annotation, so this syntax
+// (annotation type without a value) will not be allowed.
+//
+// Annotations that indicate values can use one of two syntaxes:
+//   1. If the annotation type is a scalar, the value must be in parenthesis,
+//      just like a type conversion expression in normal Go code.
+//   2. If the annotation type is a composite type (struct, array, slice, or
+//      map), the values are in curly braces, just like the syntax for composite
+//      literals in normal Go code.
+//
+//   // Scalar value
+//   @pkg.IntegerAnnotation(123)
+//   // Composite value
+//   @pkg.SliceAnnotation{123, 456, 789}
+//
+// There are two exceptions to these rules:
+//   1. If the annotation type is a struct with a single field names "Value"
+//      then the value can be written as if it were a scalar, and the scalar
+//      value will be promoted to a struct with that its singular field value.
+//   2. If the annotation type is a slice of scalar values or an array of
+//      length one, then the value can be written as if it were a scalar, and it
+//      will be promoted to a single-element slice or array.
+// These promotions are syntactic sugar to make annotation values more concise.
+//
+// The first case, an annotation type that is a struct with a single field named
+// "Value", is useful when using annotations that only allow annotation fields
+// as the kind of annotated element. If the annotation type were defined as a
+// scalar type, the value of that scalar type could not have this sort of
+// annotation on it (since they would be on a type element, not a field). So you
+// can work around this by instead declaring the annotation as a single-field
+// struct and then apply the annotations to the one field.
+//
+//   // Example annotations
+//   // @annogo.Annotation
+//   type SimpleAnno struct {
+//       // @annogo.DefaultValue("foobar")
+//       Value string
+//   }
+//   // @annogo.Annotation
+//   type SliceAnno []string
+//
+//   // Uses of these annotations may use scalar syntax:
+//   // @SimpleAnno("frobnitz")
+//   // @SliceAnno("abc")
+//
+//   // The above annotations are equivalent to these:
+//   // @SimpleAnno{Value: "frobnitz"}
+//   // @SliceAnno{"abc"} // subtle: braces instead of parentheses
+//
+// Annotation Expressions
+//
+// The syntax of annotation values is the same as the syntax for constant
+// expressions in normal Go code with a few additions:
+//   1. Annotation expressions may use composite literals (slices, arrays, maps,
+//      and structs).
+//   2. Annotation expressions may use literal nils. They can be used to express
+//      typed nils, too, but not for channel or interface types, only for slice,
+//      map, function, and pointer types.
+//   2. Annotation expressions may refer to top-level functions by name, not
+//      just to constants. This includes qualified names of methods of top-level
+//      named types and interfaces.
+//   3. While composite literals can be typed (e.g. include explicit type), the
+//      types can be omitted in most cases: type are inferred based on the known
+//      structure of the expression's type. For example, with a struct literal,
+//      the types of the struct's fields are known, so it is not necessary to
+//      state them in the annotation expression.
+//
+// Channel values cannot be expressed with annotation expressions other than via
+// untyped literal nils.
+//
+// Expressions in annotation values do not support pointer operations such as
+// pointer-dereference (*) or address-of (&). However, pointer types are allowed
+// and operations, such as address-of, are handled transparently.
+//
+//   // Here's an annotation with a pointer field
+//   // @annogo.Annotation
+//   type MyAnno struct {
+//       PtrField *int
+//   }
+//
+//   // Here's how we use it:
+//   // @MyAnno{PtrField: 123}
+//   var SomeAnnotatedElement int
+//   // When reified (during processing or at runtime, for runtime-visible
+//   // annotations), the value will be a pointer, and the pointed-to value will
+//   // be 123. As mentioned, the address-of (&) operator has been applied
+//   // transparently.
+//
+// Like in constant expressions in normal Go code, function calls are disallowed
+// except for a few special builtin functions for manipulating complex values:
+// imag(c), real(c), and complex(fr, fi).
+//
+// Annotations and Element Types
+//
+// TODO
+//
+// Meta-Annotations
+//
+// This package contains some meta-annotations, including the one that defines
+// all other annotations: @annogo.Annotation. A meta-annotation is an
+// annotation that is used only on other annotations (or their fields). They
+// are used to define characteristics of other annotations.
+//
+// In addition to to @annogo.Annotation, there are some other meta-annotations
+// in this package worth knowing about:
+//
+//  * @annogo.Required: This annotation is used on fields of annotation structs
+//    and indicates that the annotated field will not use a zero or default
+//    value. It is required that uses of the annotation provide a value for the
+//    field.
+//  * @annogo.DefaultValue: This annotation is used on fields of annotation
+//    structs and indicates the default value to use for the field when a use of
+//    annotation does not provide a value. Typically, default values, just like
+//    in normal Go code, will zero values of their respective types. But this
+//    annotation provides a way to indicate non-zero values as defaults. It is
+//    an error to annotate a field with both the Required and DefaultValue
+//    annotations -- if it has an explicit default, it makes no sense to also be
+//    required.
+//
+// Runtime-Visible Annotations
+//
+// Querying annotation values at runtime (for annotations that are visible at
+// runtime) is done using functions in this package, too. (There are numerous
+// Register* functions, which record the annotation values during package
+// initialization. But these should only be used by the code that is generated
+// by the aptgo tool.)
+//
+// The other functions take three shapes:
+//   1. GetAnnotationsFor*: These functions return annotations of a given type
+//      for a particular element. There is one function for each kind of
+//      annotated element, and each has its own way for calling code to identify
+//      the element.
+//   2. GetAllAnnotationsFor*: These functions are similar to the previous set
+//      but do not take an annotation type. Instead, they return all annotations
+//      on a given element, for all annotation types.
+//   3. GetAnnotated*OfType: These functions are for querying vars and consts of
+//      a given type that have annotations. This is most useful for types that
+//      are effectively enums, as it provides a way to query for all of the
+//      consts (presumably the enum values). However, it only returns elements
+//      that have annotations.
+//
 package annogo
