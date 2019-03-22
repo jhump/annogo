@@ -26,6 +26,7 @@ import (
 )
 
 var (
+	//lint:ignore SA1019 we still support Go 1.10 which does not have non-deprecated NewInterfaceType
 	emptyInterface = types.NewInterface(nil, nil)
 	emptyStruct    = types.NewStruct(nil, nil)
 

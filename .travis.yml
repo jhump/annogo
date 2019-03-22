@@ -5,11 +5,16 @@ matrix:
   include:
     - go: "1.9"
     - go: "1.10"
-      env: VET=1
-    # FYI: we don't vet with 1.11 because it complains about usage
-    # of a deprecated API in go/types. However, we can't move to
-    # newer non-deprecated API and still support 1.9 and 1.10.
     - go: "1.11"
+      env:
+      - GO111MODULE=off
+      - VET=1
+    - go: "1.11"
+      env: GO111MODULE=on
+    - go: "1.12"
+      env: GO111MODULE=off
+    - go: "1.12"
+      env: GO111MODULE=on
     - go: tip
 
 script:

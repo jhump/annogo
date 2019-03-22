@@ -1,5 +1,5 @@
 .PHONY: default
-default: deps checkgofmt vet predeclared staticcheck unused ineffassign test
+default: deps checkgofmt vet predeclared staticcheck ineffassign test
 
 .PHONY: deps
 deps:
@@ -33,15 +33,8 @@ vet:
 # staticheck in a way that ignores the errors in that generated code
 .PHONY: staticcheck
 staticcheck:
-	@echo staticcheck --ignore $$(go list ./... | grep parser)/annotations.y.go:* ./...
 	@go get honnef.co/go/tools/cmd/staticcheck
-	@staticcheck --ignore $$(go list ./... | grep parser)/annotations.y.go:* ./...
-
-.PHONY: unused
-unused:
-	@echo unused --ignore $$(go list ./... | grep parser)/annotations.y.go:* ./...
-	@go get honnef.co/go/tools/cmd/unused
-	@unused --ignore $$(go list ./... | grep parser)/annotations.y.go:* ./...
+	staticcheck ./...
 
 # same remarks as for staticcheck: we ignore errors in generated proto.y.go
 .PHONY: ineffassign

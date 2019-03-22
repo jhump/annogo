@@ -1,6 +1,8 @@
 %{
 package parser
 
+//lint:file-ignore U1000 generated parser has unused symbols
+
 import (
 	"go/constant"
 	"math"
