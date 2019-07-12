@@ -1,3 +1,11 @@
+// Command aptgo is the annotation processing tool for Go. It processes all
+// annotations found in the given packages, generates code to register the
+// runtime-visible annotations (so they can be queried at runtime), and then
+// also invokes any processors registered by given Go plugins, for running
+// custom annotation processors.
+//
+// The logic that generates init code (for registering runtime-visible
+// annotation values) is itself an annotation processor.
 package main
 
 import (
@@ -5,18 +13,24 @@ import (
 	"fmt"
 	"go/types"
 	"os"
+	"plugin"
 	"reflect"
 	"sort"
+	"strings"
+
+	"github.com/jhump/gopoet"
 
 	"github.com/jhump/annogo"
 	"github.com/jhump/annogo/processor"
-	"github.com/jhump/gopoet"
 )
 
 func main() {
 	test := flag.Bool("include_tests", false, "Indicates whether to process test files.")
 	outputDir := flag.String("output_dir", "", "Indicates the root directory where generated files are written."+
 		" This is a root, like GOPATH. So files are created under its 'src' sub-directory, organized by package path.")
+	var plugins multiString
+	flag.Var(&plugins, "plugins", "Indicates the path to a Go plugin to load. The plugin is expected to register processors"+
+		" in the init function of its main package. This argument may be specified multiple times to have aptgo load multiple plugins.")
 	flag.Parse()
 	if flag.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "Must supply at least one package name")
@@ -34,7 +48,21 @@ func main() {
 		}
 	}
 
-	if err := processor.ProcessAll(flag.Args(), *test, *outputDir); err != nil {
+	all := processor.AllRegisteredProcessors()
+	for _, pl := range plugins {
+		before := len(all)
+		if _, err := plugin.Open(pl); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to load plugin %s: %v\n", pl, err)
+			os.Exit(1)
+		}
+		all = processor.AllRegisteredProcessors()
+		if len(all) <= before {
+			fmt.Fprintf(os.Stderr, "Plugin %s is not a valid aptgo plugin: it did not register any processors\n", pl)
+			os.Exit(1)
+		}
+	}
+
+	if err := processor.Process(flag.Args(), *test, *outputDir, all...); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
@@ -42,6 +70,21 @@ func main() {
 
 func init() {
 	processor.RegisterProcessor(baseProcessor)
+}
+
+type multiString []string
+
+func (m multiString) String() string {
+	return strings.Join(m, ",")
+}
+
+func (m *multiString) Set(s string) error {
+	*m = append(*m, s)
+	return nil
+}
+
+func (m multiString) Get() interface{} {
+	return []string(m)
 }
 
 var typeOfAnnotation = reflect.TypeOf((*annogo.Annotation)(nil)).Elem()
@@ -155,9 +198,21 @@ func generateAnnotationValueDecl(out *gopoet.CodeBlock, name string, val process
 	out.AddCode(&cb)
 }
 
+func generateAdapterFunctionDecl(out *gopoet.CodeBlock, name string, fromType, toType types.Type) {
+	var cb gopoet.CodeBlock
+	cb.Printf("%s := ", name)
+	// TODO: use type conversion for named function types
+	// TODO: create adapter function; convert maps, slices, arrays, pointers, and funcs
+	// TODO: panic if need to convert a chan
+	// TODO: register the adapter
+
+	// once we're done, we can add the code for this variable to the output
+	out.AddCode(&cb)
+}
+
 func generateAnnotationValue(out, curr *gopoet.CodeBlock, base string, requireCompoundName, requireScalarName bool, val processor.AnnotationValue) {
 	if val.Kind == processor.KindNil {
-		if !requireScalarName {
+		if requireScalarName {
 			curr.Printf("%s(nil)", val.Type)
 		} else {
 			curr.Print("nil")
@@ -245,8 +300,16 @@ func generateAnnotationValue(out, curr *gopoet.CodeBlock, base string, requireCo
 		// case we need to generate an anonymous function here that adapts the
 		// signature. If any array, slice, or map values need to be adapted,
 		// they will need to be copied (possibly recursively) to convert the
-		// value to the correct type
-		curr.Printf("%s", val.AsFunc())
+		// value to the correct type. The generated code should register any
+		// adapters via annogo.RegisterAdaptedFunction.
+		fn := val.AsFunc()
+		if !types.AssignableTo(fn.Type(), t) {
+			varName := fmt.Sprintf("%s_p", base)
+			generateAdapterFunctionDecl(out, varName, fn.Type(), t)
+			curr.Print(varName)
+		} else {
+			curr.Printf("%s", val.AsFunc())
+		}
 
 	case *types.Array, *types.Slice:
 		if requireCompoundName {

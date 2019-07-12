@@ -110,7 +110,7 @@ func getConstantValue(t types.Type, v constant.Value) interface{} {
 		return constant.StringVal(v)
 	}
 	if fn, ok := v.(funcConstant); ok {
-		return fn
+		return fn.fn
 	}
 	panic(fmt.Sprintf("unrecognized type and value: %v, %v", t, v))
 }
@@ -151,12 +151,12 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 			return obj.Type(), funcConstant{Value: constant.MakeUnknown(), fn: fn}, nil, nil
 		} else {
 			pos := adjuster.adjustPosition(node.Ident.Pos)
-			return nil, nil, nil, posError(pos, fmt.Errorf("identifier must be a constant or a function"))
+			return nil, nil, nil, NewErrorWithPosition(pos, fmt.Errorf("identifier must be a constant or a function"))
 		}
 
 	case parser.AggregateNode:
 		pos := adjuster.adjustPosition(node.Pos())
-		return nil, nil, nil, posError(pos, fmt.Errorf("aggregate cannot be used in a constant expression"))
+		return nil, nil, nil, NewErrorWithPosition(pos, fmt.Errorf("aggregate cannot be used in a constant expression"))
 
 	case parser.TypedExpressionNode:
 		vt, v, ref, err := c.determineConstantValue(file, node.Value, adjuster)
@@ -169,7 +169,7 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		}
 		pos := adjuster.adjustPosition(node.Pos())
 		if !types.ConvertibleTo(vt, t) {
-			return nil, nil, nil, posError(pos, fmt.Errorf("cannot convert %v to %v", vt, t))
+			return nil, nil, nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert %v to %v", vt, t))
 		}
 		basic, ok := t.Underlying().(*types.Basic)
 		typePos := adjuster.adjustPosition(node.Type.Pos())
@@ -239,7 +239,7 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 			fn = convertToString
 			target = ""
 		default:
-			return nil, nil, nil, posError(typePos, fmt.Errorf("non-basic types cannot be used in a constant expression"))
+			return nil, nil, nil, NewErrorWithPosition(typePos, fmt.Errorf("non-basic types cannot be used in a constant expression"))
 		}
 		rv, err := fn(v, target, pos)
 		if err != nil {
@@ -262,14 +262,14 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		opPos := adjuster.adjustPosition(node.OperatorPos)
 
 		if isNil(lt) {
-			return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for nil values"))
+			return nil, nil, nil, NewErrorWithPosition(leftPos, fmt.Errorf("operator not valid for nil values"))
 		} else if isNil(rt) {
-			return nil, nil, nil, posError(rightPos, fmt.Errorf("operator not valid for nil values"))
+			return nil, nil, nil, NewErrorWithPosition(rightPos, fmt.Errorf("operator not valid for nil values"))
 		}
 		if isNaN(lv) {
-			return nil, nil, nil, posError(leftPos, fmt.Errorf("operators not valid with NaN values"))
+			return nil, nil, nil, NewErrorWithPosition(leftPos, fmt.Errorf("operators not valid with NaN values"))
 		} else if isNaN(rv) {
-			return nil, nil, nil, posError(rightPos, fmt.Errorf("operators not valid with NaN values"))
+			return nil, nil, nil, NewErrorWithPosition(rightPos, fmt.Errorf("operators not valid with NaN values"))
 		}
 
 		opTok := toToken(node.Operator)
@@ -282,30 +282,30 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 			tt = lt
 		}
 		if tt == nil {
-			return nil, nil, nil, posError(opPos, fmt.Errorf("incompatible types: %v and %v", lt, rt))
+			return nil, nil, nil, NewErrorWithPosition(opPos, fmt.Errorf("incompatible types: %v and %v", lt, rt))
 		}
 
 		if _, ok := lt.Underlying().(*types.Basic); !ok {
-			return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values", lt))
+			return nil, nil, nil, NewErrorWithPosition(leftPos, fmt.Errorf("operator not valid for %v values", lt))
 		}
 
 		var v constant.Value
 		if isShift(opTok) {
 			if !isInt(lt) {
-				return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values (only integers)", lt))
+				return nil, nil, nil, NewErrorWithPosition(leftPos, fmt.Errorf("operator not valid for %v values (only integers)", lt))
 			}
 			if !isUint(rt, rv) {
-				return nil, nil, nil, posError(rightPos, fmt.Errorf("shift operand must be uint"))
+				return nil, nil, nil, NewErrorWithPosition(rightPos, fmt.Errorf("shift operand must be uint"))
 			}
 
 			// bitwise shift operation
 			sh64, ok := constant.Uint64Val(rv)
 			if !ok {
-				return nil, nil, nil, posError(rightPos, fmt.Errorf("shift operand overflows uint: %v", rv))
+				return nil, nil, nil, NewErrorWithPosition(rightPos, fmt.Errorf("shift operand overflows uint: %v", rv))
 			}
 			sh := uint(sh64)
 			if uint64(sh) != sh64 {
-				return nil, nil, nil, posError(rightPos, fmt.Errorf("shift operand overflows uint: %v", rv))
+				return nil, nil, nil, NewErrorWithPosition(rightPos, fmt.Errorf("shift operand overflows uint: %v", rv))
 			}
 
 			v = constant.Shift(lv, opTok, sh)
@@ -315,14 +315,14 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 			tt = typeUntypedBool
 
 			if isFunc(lv) || lv == nil || isFunc(rv) || rv == nil {
-				return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values", lt))
+				return nil, nil, nil, NewErrorWithPosition(leftPos, fmt.Errorf("operator not valid for %v values", lt))
 			}
 
 			if isOrderedComparison(opTok) {
 				if isComplex(lt) || isBool(lt) {
-					return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values", lt))
+					return nil, nil, nil, NewErrorWithPosition(leftPos, fmt.Errorf("operator not valid for %v values", lt))
 				} else if isComplex(rt) || isBool(rt) {
-					return nil, nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values", rt))
+					return nil, nil, nil, NewErrorWithPosition(rightPos, fmt.Errorf("operator not valid for %v values", rt))
 				}
 			}
 
@@ -330,15 +330,15 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 
 		} else {
 			if isFunc(lv) || lv == nil {
-				return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values", lt))
+				return nil, nil, nil, NewErrorWithPosition(leftPos, fmt.Errorf("operator not valid for %v values", lt))
 			} else if isFunc(rv) || rv == nil {
-				return nil, nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values", rt))
+				return nil, nil, nil, NewErrorWithPosition(rightPos, fmt.Errorf("operator not valid for %v values", rt))
 			}
 
 			// normal binary operation
 			if opTok == token.QUO {
 				if isZero(rv) {
-					return nil, nil, nil, posError(rightPos, fmt.Errorf("divide by zero not allowed"))
+					return nil, nil, nil, NewErrorWithPosition(rightPos, fmt.Errorf("divide by zero not allowed"))
 				}
 				if isInt(tt) {
 					opTok = token.QUO_ASSIGN
@@ -346,20 +346,20 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 			}
 			if isIntOnlyOperation(opTok) {
 				if !isInt(lt) {
-					return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values (only integers)", lt))
+					return nil, nil, nil, NewErrorWithPosition(leftPos, fmt.Errorf("operator not valid for %v values (only integers)", lt))
 				} else if !isInt(rt) {
-					return nil, nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values (only integers)", rt))
+					return nil, nil, nil, NewErrorWithPosition(rightPos, fmt.Errorf("operator not valid for %v values (only integers)", rt))
 				}
 			}
 			if isLogicalOperation(opTok) {
 				if !isBool(lt) {
-					return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for %v values (only bools)", lt))
+					return nil, nil, nil, NewErrorWithPosition(leftPos, fmt.Errorf("operator not valid for %v values (only bools)", lt))
 				} else if !isBool(rt) {
-					return nil, nil, nil, posError(rightPos, fmt.Errorf("operator not valid for %v values (only bools", rt))
+					return nil, nil, nil, NewErrorWithPosition(rightPos, fmt.Errorf("operator not valid for %v values (only bools", rt))
 				}
 			}
 			if isString(tt) && opTok != token.ADD {
-				return nil, nil, nil, posError(leftPos, fmt.Errorf("operator not valid for string values"))
+				return nil, nil, nil, NewErrorWithPosition(leftPos, fmt.Errorf("operator not valid for string values"))
 			}
 
 			v = constant.BinaryOp(lv, opTok, rv)
@@ -375,7 +375,7 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 
 		pos := adjuster.adjustPosition(node.Value.Pos())
 		if isNaN(v) {
-			return nil, nil, nil, posError(pos, fmt.Errorf("operators not valid with NaN values"))
+			return nil, nil, nil, NewErrorWithPosition(pos, fmt.Errorf("operators not valid with NaN values"))
 		}
 
 		opTok := toToken(node.Operator)
@@ -384,7 +384,7 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		case token.XOR:
 			// bitwise negation
 			if !isInt(t) {
-				return nil, nil, nil, posError(pos, fmt.Errorf("operator not valid for %v values (only integers)", t))
+				return nil, nil, nil, NewErrorWithPosition(pos, fmt.Errorf("operator not valid for %v values (only integers)", t))
 			}
 			// ^x == -(x+1) in 2's complement
 			v = constant.BinaryOp(constant.MakeInt64(1), token.ADD, v)
@@ -393,14 +393,14 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		case token.SUB:
 			// unary minus
 			if !isNumber(t) {
-				return nil, nil, nil, posError(pos, fmt.Errorf("operator not valid for %v values (only integers)", t))
+				return nil, nil, nil, NewErrorWithPosition(pos, fmt.Errorf("operator not valid for %v values (only integers)", t))
 			}
 			res = constant.BinaryOp(constant.MakeInt64(-1), token.MUL, v)
 
 		case token.NOT:
 			// logical not
 			if !isBool(t) {
-				return nil, nil, nil, posError(pos, fmt.Errorf("operator not valid for %v values (only bools)", t))
+				return nil, nil, nil, NewErrorWithPosition(pos, fmt.Errorf("operator not valid for %v values (only bools)", t))
 			}
 			res = constant.MakeBool(!constant.BoolVal(v))
 
@@ -431,7 +431,7 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		}
 		pos := adjuster.adjustPosition(arg.Pos())
 		if !isComplex(t) && !constAssignableTo(t, typeComplex64) && !constAssignableTo(t, typeComplex128) {
-			return nil, nil, nil, posError(pos, fmt.Errorf("invalid argument type for %s: %v", name, t))
+			return nil, nil, nil, NewErrorWithPosition(pos, fmt.Errorf("invalid argument type for %s: %v", name, t))
 		}
 		res := fn(v)
 		switch t.Underlying().(*types.Basic).Kind() {
@@ -459,19 +459,19 @@ func (c *Context) determineConstantValue(file *ast.File, node parser.ExpressionN
 		imagPos := adjuster.adjustPosition(node.ImagArg.Pos())
 
 		if !constAssignableTo(rt, it) && !constAssignableTo(it, rt) {
-			return nil, nil, nil, posError(pos, fmt.Errorf("incompatible types: %v and %v", rt, it))
+			return nil, nil, nil, NewErrorWithPosition(pos, fmt.Errorf("incompatible types: %v and %v", rt, it))
 		}
 		if !isFloat(rt) && !constAssignableTo(rt, typeFloat64) && !constAssignableTo(rt, typeFloat32) {
-			return nil, nil, nil, posError(realPos, fmt.Errorf("invalid argument type for complex: %v", rt))
+			return nil, nil, nil, NewErrorWithPosition(realPos, fmt.Errorf("invalid argument type for complex: %v", rt))
 		} else if !isFloat(it) && !constAssignableTo(it, typeFloat64) && !constAssignableTo(it, typeFloat32) {
-			return nil, nil, nil, posError(imagPos, fmt.Errorf("invalid argument type for complex: %v", it))
+			return nil, nil, nil, NewErrorWithPosition(imagPos, fmt.Errorf("invalid argument type for complex: %v", it))
 		}
 
 		if rv.Kind() == constant.Unknown {
-			return nil, nil, nil, posError(realPos, fmt.Errorf("invalid argument NaN for complex"))
+			return nil, nil, nil, NewErrorWithPosition(realPos, fmt.Errorf("invalid argument NaN for complex"))
 		}
 		if iv.Kind() == constant.Unknown {
-			return nil, nil, nil, posError(imagPos, fmt.Errorf("invalid argument NaN for complex"))
+			return nil, nil, nil, NewErrorWithPosition(imagPos, fmt.Errorf("invalid argument NaN for complex"))
 		}
 
 		iv = constant.MakeImag(iv)
@@ -693,31 +693,31 @@ func convertToInt(v constant.Value, t interface{}, pos token.Position) (constant
 	switch v.Kind() {
 	case constant.Unknown:
 		// shouldn't be a func since we should have already done convertibility check
-		return nil, posError(pos, fmt.Errorf("cannot convert NaN to %T", t))
+		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert NaN to %T", t))
 	case constant.Int:
 		var ok bool
 		src, ok = constant.Int64Val(v)
 		if !ok {
-			return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+			return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 		}
 	case constant.Float:
 		f, ok := constant.Float64Val(v)
 		if !ok {
-			return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+			return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 		}
 		if f > math.MaxInt64 || f < math.MinInt64 {
-			return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+			return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 		}
 		src = int64(f)
 	default:
-		return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T", t))
+		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T", t))
 	}
 
 	rv := reflect.New(reflect.TypeOf(t)).Elem()
 	rv.SetInt(src)
 	roundTripped := rv.Int()
 	if src != roundTripped {
-		return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 	}
 	return constant.MakeInt64(src), nil
 }
@@ -727,31 +727,31 @@ func convertToUint(v constant.Value, t interface{}, pos token.Position) (constan
 	switch v.Kind() {
 	case constant.Unknown:
 		// shouldn't be a func since we should have already done convertibility check
-		return nil, posError(pos, fmt.Errorf("cannot convert NaN to %T", t))
+		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert NaN to %T", t))
 	case constant.Int:
 		var ok bool
 		src, ok = constant.Uint64Val(v)
 		if !ok {
-			return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+			return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 		}
 	case constant.Float:
 		f, ok := constant.Float64Val(v)
 		if !ok {
-			return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+			return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 		}
 		if f > math.MaxUint64 || f < 0 {
-			return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+			return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 		}
 		src = uint64(f)
 	default:
-		return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T", t))
+		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T", t))
 	}
 
 	rv := reflect.New(reflect.TypeOf(t)).Elem()
 	rv.SetUint(src)
 	roundTripped := rv.Uint()
 	if src != roundTripped {
-		return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 	}
 	return constant.MakeUint64(src), nil
 }
@@ -760,13 +760,13 @@ func convertToFloat(v constant.Value, t interface{}, pos token.Position) (consta
 	switch v.Kind() {
 	case constant.Unknown:
 		// shouldn't be a func since we should have already done convertibility check
-		return nil, posError(pos, fmt.Errorf("cannot convert NaN to %T", t))
+		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert NaN to %T", t))
 	case constant.Int, constant.Float:
 		switch t.(type) {
 		case float64:
 			src, ok := constant.Float64Val(v)
 			if !ok && math.IsInf(src, 0) {
-				return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+				return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 			}
 			return v, nil
 		case float32:
@@ -774,14 +774,14 @@ func convertToFloat(v constant.Value, t interface{}, pos token.Position) (consta
 			src, ok := constant.Float32Val(v)
 			src64 := float64(src)
 			if !ok && math.IsInf(src64, 0) {
-				return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+				return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 			}
 			return constant.MakeFloat64(src64), nil
 		default:
 			panic(fmt.Sprintf("invalid float type %T", t))
 		}
 	default:
-		return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T", t))
+		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T", t))
 	}
 }
 
@@ -789,17 +789,17 @@ func convertToComplex(v constant.Value, t interface{}, pos token.Position) (cons
 	switch v.Kind() {
 	case constant.Unknown:
 		// shouldn't be a func since we should have already done convertibility check
-		return nil, posError(pos, fmt.Errorf("cannot convert NaN to %T", t))
+		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert NaN to %T", t))
 	case constant.Int, constant.Float:
 		switch t.(type) {
 		case float64:
 			srcR, ok := constant.Float64Val(constant.Real(v))
 			if !ok && math.IsInf(srcR, 0) {
-				return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+				return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 			}
 			srcI, ok := constant.Float64Val(constant.Imag(v))
 			if !ok && math.IsInf(srcI, 0) {
-				return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+				return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 			}
 			return v, nil
 		case float32:
@@ -807,12 +807,12 @@ func convertToComplex(v constant.Value, t interface{}, pos token.Position) (cons
 			srcR, ok := constant.Float32Val(constant.Real(v))
 			r64 := float64(srcR)
 			if !ok && math.IsInf(r64, 0) {
-				return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+				return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 			}
 			srcI, ok := constant.Float32Val(constant.Imag(v))
 			i64 := float64(srcI)
 			if !ok && math.IsInf(i64, 0) {
-				return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
+				return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T because it overflows", t))
 			}
 			r := constant.MakeFloat64(r64)
 			i := constant.MakeImag(constant.MakeFloat64(i64))
@@ -821,7 +821,7 @@ func convertToComplex(v constant.Value, t interface{}, pos token.Position) (cons
 			panic(fmt.Sprintf("invalid float type %T", t))
 		}
 	default:
-		return nil, posError(pos, fmt.Errorf("cannot convert constant value to %T", t))
+		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to %T", t))
 	}
 }
 
@@ -830,7 +830,7 @@ func convertToString(v constant.Value, _ interface{}, pos token.Position) (const
 		return v, nil
 	}
 	if v.Kind() != constant.Int {
-		return nil, posError(pos, fmt.Errorf("cannot convert constant value to string (integers only)"))
+		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to string (integers only)"))
 	}
 	u64, ok := constant.Uint64Val(v)
 	if !ok {

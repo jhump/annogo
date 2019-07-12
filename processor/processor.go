@@ -78,7 +78,9 @@ func (e *ErrorWithPosition) Pos() token.Position {
 	return e.pos
 }
 
-func posError(pos token.Position, err error) error {
+// NewErrorWithPosition returns the given error, but associates it with the
+// given source code location.
+func NewErrorWithPosition(pos token.Position, err error) *ErrorWithPosition {
 	return &ErrorWithPosition{err: err, pos: pos}
 }
 
@@ -204,19 +206,38 @@ func (cfg *Config) Execute() error {
 // a single package (for which the processors were invoked). It provides access
 // to all annotations and annotated elements encountered in the package.
 type Context struct {
+	// Package holds all information about the package being processed. It
+	// provides access to the ASTs of files in the package as well as the
+	// results of type analysis, to allow for introspection of package elements.
 	Package *loader.PackageInfo
+
+	// Program holds information about an entire program being processed, which
+	// includes any packages that are being processed as well as their
+	// dependencies (including indirect dependencies, e.g. the full transitive
+	// closure). This also provides access to the token.FileSet, which can be
+	// used to resolve details for source code locations.
 	Program *loader.Program
 
 	allContexts   map[*types.Package]*Context
 	metadata      map[*types.TypeName]*AnnotationMetadata
 	fieldMetadata map[types.Object][]AnnotationMirror
 
-	allElements         []*AnnotatedElement
+	allElements []*AnnotatedElement
+	// AllElementsByObject is map of all elements in the package (represented by
+	// types.Object instances) that have annotations to a corresponding
+	// AnnotatedElement structure.
+	//
+	// Also see methods Context.NumElements, Context.GetElement, and
+	// Context.ElementsOfType.
 	AllElementsByObject map[types.Object]*AnnotatedElement
-	AllAnnotationTypes  map[string][]string
-	byType              map[annogo.ElementType][]*AnnotatedElement
-	byAnnotation        map[annoType][]*AnnotatedElement
-	processed           map[*ast.CommentGroup]struct{}
+	// AllAnnotationTypes indicates the names of all annotation types found in
+	// the package's sources. The map is keyed by package import path, with the
+	// values being slices of unqualified names of annotation types in that
+	// package.
+	AllAnnotationTypes map[string][]string
+	byType             map[annogo.ElementType][]*AnnotatedElement
+	byAnnotation       map[annoType][]*AnnotatedElement
+	processed          map[*ast.CommentGroup]struct{}
 }
 
 func newContext(pkg *loader.PackageInfo, prg *loader.Program, contextPool map[*types.Package]*Context) *Context {
@@ -330,7 +351,7 @@ func (c *Context) ElementsAnnotatedWith(packagePath, typeName string) []*Annotat
 
 func (c *Context) computeAllAnnotations() error {
 	// TODO: support package annotations
-	// TODO: provide mechanism to "import" packages used by annotations by unused by
+	// TODO: provide mechanism to "import" packages used by annotations but unused by
 	// actual application code (perhaps special '// @import' comments between the
 	// package declaration and the first element declaration, among actual imports)
 
@@ -600,7 +621,7 @@ func (c *Context) parseAnnotations(file *ast.File, selfType types.Type, doc *ast
 	if a, err := parser.ParseAnnotations("", buf); err != nil {
 		perr := err.(*parser.ParseError)
 		pos := adjuster.adjustPosition(perr.Pos())
-		return nil, posError(pos, perr.Underlying())
+		return nil, NewErrorWithPosition(pos, perr.Underlying())
 	} else {
 		annos = a
 	}
@@ -657,7 +678,7 @@ func (c *Context) convertAnnotation(file *ast.File, selfType types.Type, a parse
 	}
 	if _, ok := anno.(*types.TypeName); !ok {
 		pos := adjuster.adjustPosition(a.Type.Pos)
-		return mirror, posError(pos, fmt.Errorf("%v is not a type", a.Type))
+		return mirror, NewErrorWithPosition(pos, fmt.Errorf("%v is not a type", a.Type))
 	}
 
 	if mode == modeTypeMetadata {
@@ -681,7 +702,7 @@ func (c *Context) convertAnnotation(file *ast.File, selfType types.Type, a parse
 	if meta == nil {
 		// we've already queried metadata for the type; it's not an annotation
 		pos := adjuster.adjustPosition(a.Type.Pos)
-		return mirror, posError(pos, fmt.Errorf("%v is not an annotation type", a.Type))
+		return mirror, NewErrorWithPosition(pos, fmt.Errorf("%v is not an annotation type", a.Type))
 	}
 
 	p := annoPkg.Pkg
@@ -701,7 +722,7 @@ func (c *Context) convertAnnotation(file *ast.File, selfType types.Type, a parse
 		case *types.Struct:
 			tv.v = ([]parser.Element)(nil)
 		default:
-			return mirror, posError(tv.pos, fmt.Errorf("annotation %v requires a value since its type is not bool or struct", a.Type))
+			return mirror, NewErrorWithPosition(tv.pos, fmt.Errorf("annotation %v requires a value since its type is not bool or struct", a.Type))
 		}
 		av, err = c.convertValue(file, tv, selfType, meta.Representation, p, adjuster)
 	}
@@ -753,7 +774,7 @@ func (c *Context) resolveSymbol(file *ast.File, id parser.Identifier, adjuster p
 						if impPkg.Path() == imp.Path.Value && impPkg.Name() == id.PackageAlias {
 							if o := impPkg.Scope().Lookup(id.Name); o != nil {
 								if obj != nil {
-									return nil, nil, posError(pos, fmt.Errorf("package name %s is ambiguous; could be %q or %q", id.PackageAlias, obj.Pkg().Path(), o.Pkg().Path()))
+									return nil, nil, NewErrorWithPosition(pos, fmt.Errorf("package name %s is ambiguous; could be %q or %q", id.PackageAlias, obj.Pkg().Path(), o.Pkg().Path()))
 								}
 								obj = o
 								pkg = c.Program.AllPackages[impPkg]
@@ -764,7 +785,7 @@ func (c *Context) resolveSymbol(file *ast.File, id parser.Identifier, adjuster p
 				}
 			}
 			if obj == nil || !obj.Exported() {
-				return nil, nil, posError(pos, fmt.Errorf("symbol %v does not exist", id))
+				return nil, nil, NewErrorWithPosition(pos, fmt.Errorf("symbol %v does not exist", id))
 			}
 		}
 	}
@@ -853,7 +874,18 @@ func (c *Context) putMetadata(anno *types.TypeName, am AnnotationMirror) (*Annot
 		switch name {
 		case "FactoryFunc":
 			if val.Kind != KindNil {
-				// TODO: validate that factory func is exported if the annotation type is exported
+				if anno.Exported() && !val.AsFunc().Exported() {
+					return nil, NewErrorWithPosition(val.Pos,
+						fmt.Errorf("annotation %s.%s is exported, so its factory function must also be exported",
+							anno.Pkg().Path(), anno.Name()))
+				}
+				if !val.AsFunc().Exported() && val.AsFunc().Pkg().Path() != anno.Pkg().Path() {
+					// TODO: remove this check? type analysis should have already caught this
+					// error and caused processing to fail before we get to this point
+					return nil, NewErrorWithPosition(val.Pos,
+						fmt.Errorf("annotation %s.%s cannot use unexpected factory function from another package",
+							anno.Pkg().Path(), anno.Name()))
+				}
 				meta.FactoryFunc = val.AsFunc()
 			}
 		case "RuntimeVisible":
@@ -1138,7 +1170,7 @@ func (c *Context) convertValue(file *ast.File, tv typeAndVal, selfType, targetTy
 		switch t := typ.(type) {
 		case *types.Array:
 			if t.Len() != 1 {
-				return nilValue, posError(tv.pos, fmt.Errorf("array must have length %d but given literal value has 1 element", t.Len()))
+				return nilValue, NewErrorWithPosition(tv.pos, fmt.Errorf("array must have length %d but given literal value has 1 element", t.Len()))
 			}
 			elemType = t.Elem()
 		case *types.Slice:
@@ -1250,7 +1282,7 @@ func (c *Context) tryConvertValue(file *ast.File, tv typeAndVal, selfType, targe
 				return c.convertMapValue(file, v, tv.pos, selfType, t, ntyp, adjuster)
 			case *types.Array:
 				if t.Len() != int64(len(v)) {
-					return nilValue, posError(tv.pos, fmt.Errorf("array must have length %d but given literal value has %d elements", t.Len(), len(v)))
+					return nilValue, NewErrorWithPosition(tv.pos, fmt.Errorf("array must have length %d but given literal value has %d elements", t.Len(), len(v)))
 				}
 				return c.convertSliceValue(file, v, tv.pos, selfType, t.Elem(), ntyp, adjuster)
 			case *types.Slice:
@@ -1285,9 +1317,9 @@ func (c *Context) tryConvertValue(file *ast.File, tv typeAndVal, selfType, targe
 
 	rewritten := rewriteSelfType(targetType, selfType)
 	if types.Identical(targetType, rewritten) {
-		return nilValue, wrongTypeError{err: posError(tv.pos, fmt.Errorf("annotation value of type %s cannot be assigned to %v", sourceType, targetType))}
+		return nilValue, wrongTypeError{err: NewErrorWithPosition(tv.pos, fmt.Errorf("annotation value of type %s cannot be assigned to %v", sourceType, targetType))}
 	} else {
-		return nilValue, wrongTypeError{err: posError(tv.pos, fmt.Errorf("annotation value of type %s cannot be assigned to %v (%v)", sourceType, targetType, rewritten))}
+		return nilValue, wrongTypeError{err: NewErrorWithPosition(tv.pos, fmt.Errorf("annotation value of type %s cannot be assigned to %v (%v)", sourceType, targetType, rewritten))}
 	}
 }
 
@@ -1430,6 +1462,7 @@ func annotationValue(sourceType, targetType types.Type, value interface{}, kind 
 				case types.UntypedNil:
 					// instead of using a nil type, just use the target interface type
 					sourceType = targetType
+				case types.UntypedInt:
 					// we have to leave UntypedInt alone since we don't know at this
 					// point whether it needs to be int64 (e.g. if it's negative) or
 					// uint64 (e.g. too big to fit in int64).
@@ -1689,13 +1722,13 @@ func (c *Context) convertStructValue(file *ast.File, v []parser.Element, pos tok
 	strct := make([]AnnotationStructEntry, len(v))
 	if len(v) > 0 && !v[0].HasKey {
 		if len(v) != structType.NumFields() {
-			return nilValue, posError(pos, fmt.Errorf("too few values for struct type %s; expecting %d, got %d", nt.String(), structType.NumFields(), len(v)))
+			return nilValue, NewErrorWithPosition(pos, fmt.Errorf("too few values for struct type %s; expecting %d, got %d", nt.String(), structType.NumFields(), len(v)))
 		}
 		for i, fldVal := range v {
 			fld := structType.Field(i)
 			if !fld.Exported() && !isLocal {
 				pos := adjuster.adjustPosition(fldVal.Pos())
-				return nilValue, posError(pos, fmt.Errorf("cannot set non-exported field %s of type %s", fld.Name(), nt.String()))
+				return nilValue, NewErrorWithPosition(pos, fmt.Errorf("cannot set non-exported field %s of type %s", fld.Name(), nt.String()))
 			}
 			av, err := c.convertExpression(file, fldVal.Value, selfType, fld.Type(), fld.Pkg(), adjuster)
 			if err != nil {
@@ -1720,20 +1753,20 @@ func (c *Context) convertStructValue(file *ast.File, v []parser.Element, pos tok
 				}
 			}
 			if fldName == "" {
-				return nilValue, posError(pos, fmt.Errorf("cannot assign map value to type %s", nt.String()))
+				return nilValue, NewErrorWithPosition(pos, fmt.Errorf("cannot assign map value to type %s", nt.String()))
 			}
 			if _, ok := fieldNames[fldName]; ok {
 				pos := adjuster.adjustPosition(fldVal.Key.Pos())
-				return nilValue, posError(pos, fmt.Errorf("struct value has duplicate entries: field %q", fldName))
+				return nilValue, NewErrorWithPosition(pos, fmt.Errorf("struct value has duplicate entries: field %q", fldName))
 			}
 			fld := fields[fldName]
 			if fld == nil {
 				pos := adjuster.adjustPosition(fldVal.Pos())
-				return nilValue, posError(pos, fmt.Errorf("struct type %s has no field named %s", nt.String(), fldName))
+				return nilValue, NewErrorWithPosition(pos, fmt.Errorf("struct type %s has no field named %s", nt.String(), fldName))
 			}
 			if !fld.Exported() && !isLocal {
 				pos := adjuster.adjustPosition(fldVal.Pos())
-				return nilValue, posError(pos, fmt.Errorf("cannot set non-exported field %s of type %s", fld.Name(), nt.String()))
+				return nilValue, NewErrorWithPosition(pos, fmt.Errorf("cannot set non-exported field %s of type %s", fld.Name(), nt.String()))
 			}
 			delete(fields, fldName)
 			av, err := c.convertExpression(file, fldVal.Value, selfType, fld.Type(), fld.Pkg(), adjuster)
@@ -1760,7 +1793,7 @@ func (c *Context) convertStructValue(file *ast.File, v []parser.Element, pos tok
 			}
 			a := findAnnotations(fieldAnnos, requiredPkg, requiredName)
 			if len(a) > 0 && a[0].Value.AsBool() {
-				return nilValue, posError(pos, fmt.Errorf("field %s is not specified but is required", fld.Name()))
+				return nilValue, NewErrorWithPosition(pos, fmt.Errorf("field %s is not specified but is required", fld.Name()))
 			}
 			a = findAnnotations(fieldAnnos, defaultPkg, defaultName)
 			if len(a) > 0 {
@@ -1801,7 +1834,7 @@ func (c *Context) convertMapValue(file *ast.File, v []parser.Element, pos token.
 func (c *Context) convertSliceValue(file *ast.File, v []parser.Element, pos token.Position, selfType types.Type, elemType, nt types.Type, adjuster posAdjuster) (AnnotationValue, error) {
 	if len(v) > 0 && v[0].HasKey {
 		pos := adjuster.adjustPosition(v[0].Key.Pos())
-		return nilValue, posError(pos, fmt.Errorf("slice/array values should not have keys"))
+		return nilValue, NewErrorWithPosition(pos, fmt.Errorf("slice/array values should not have keys"))
 	}
 
 	sl := make([]AnnotationValue, len(v))
@@ -1843,7 +1876,7 @@ func (c *Context) convertCompositeValue(file *ast.File, v []parser.Element, pos 
 			fields[i] = fld
 			pos := adjuster.adjustPosition(e.Key.Pos())
 			if _, ok := fieldNames[fld.Name()]; ok {
-				return nilValue, posError(pos, fmt.Errorf("struct value has duplicate entries: field %q", fld.Name()))
+				return nilValue, NewErrorWithPosition(pos, fmt.Errorf("struct value has duplicate entries: field %q", fld.Name()))
 			}
 			fieldNames[fld.Name()] = struct{}{}
 			strct[i] = AnnotationStructEntry{Field: fld, Pos: pos, Value: av}
@@ -1863,7 +1896,7 @@ func (c *Context) convertCompositeValue(file *ast.File, v []parser.Element, pos 
 			k := c.GetValue(avk, true)
 			if _, ok := keys[k]; ok {
 				pos := adjuster.adjustPosition(e.Key.Pos())
-				return nilValue, posError(pos, fmt.Errorf("map value has duplicate entries: key = %v", k))
+				return nilValue, NewErrorWithPosition(pos, fmt.Errorf("map value has duplicate entries: key = %v", k))
 			}
 			if keyType == nil {
 				keyType = avk.Type
@@ -2004,16 +2037,16 @@ func (c *Context) convertType(file *ast.File, t parser.Type, adjuster posAdjuste
 		var l int64
 		if i, ok := v.(int64); ok {
 			if i < 0 {
-				return nil, posError(pos, fmt.Errorf("array bound is negative: %v", v))
+				return nil, NewErrorWithPosition(pos, fmt.Errorf("array bound is negative: %v", v))
 			}
 			l = i
 		} else if u, ok := v.(uint64); ok {
 			if u > math.MaxInt64 {
-				return nil, posError(pos, fmt.Errorf("array bound overflows int64: %v", v))
+				return nil, NewErrorWithPosition(pos, fmt.Errorf("array bound overflows int64: %v", v))
 			}
 			l = int64(u)
 		} else {
-			return nil, posError(pos, fmt.Errorf("array bound must be integer type; got %v", exptyp))
+			return nil, NewErrorWithPosition(pos, fmt.Errorf("array bound must be integer type; got %v", exptyp))
 		}
 
 		e, err := c.convertType(file, t.Elem(), adjuster)
