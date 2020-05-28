@@ -833,12 +833,12 @@ func convertToString(v constant.Value, _ interface{}, pos token.Position) (const
 		return nil, NewErrorWithPosition(pos, fmt.Errorf("cannot convert constant value to string (integers only)"))
 	}
 	u64, ok := constant.Uint64Val(v)
-	if !ok {
+	if !ok || u64 > math.MaxInt32 {
 		// this is the value for conversion from numbers to string for values
 		// that are not valid unicode points
 		return constant.MakeString("\uFFFD"), nil
 	}
-	return constant.MakeString(string(u64)), nil
+	return constant.MakeString(string(rune(u64))), nil
 }
 
 func isUntyped(t types.Type) bool {
