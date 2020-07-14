@@ -1,5 +1,5 @@
 # Anno-Go
-[![Build Status](https://travis-ci.org/jhump/annogo.svg?branch=master)](https://travis-ci.org/jhump/annogo)
+[![Build Status](https://travis-ci.com/jhump/annogo.svg?branch=master)](https://travis-ci.com/github/jhump/annogo/branches)
 [![Go Report Card](https://goreportcard.com/badge/github.com/jhump/annogo)](https://goreportcard.com/report/github.com/jhump/annogo)
 [![GoDoc](https://godoc.org/github.com/jhump/annogo?status.svg)](https://godoc.org/github.com/jhump/annogo)
 
